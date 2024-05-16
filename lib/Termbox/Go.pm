@@ -18,7 +18,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.1.0_0');
+our $VERSION = version->declare('v0.1.1_0');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -28,13 +28,14 @@ our $AUTHORITY = 'github:brickpool';
 # ------------------------------------------------------------------------
 
 use Carp qw( croak );
+use English qw( -no_match_vars );
 use Import::into;
 
 my %module = (
   MSWin32 => 'Win32',
 );
  
-my $module = $module{$^O} || 'Win32';
+my $module = $module{$OSNAME} || 'Win32';
  
 require Termbox::Go::Legacy;
 require Termbox::Go::Common;

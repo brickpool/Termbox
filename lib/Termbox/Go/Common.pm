@@ -1,6 +1,6 @@
 # ------------------------------------------------------------------------
 #
-#   Win32 Termbox implementation
+#   Termbox::Go implementation
 #
 #   Code based on termbox-go v1.1.1, 21. April 2021
 #
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.1.0_0');
+our $VERSION = version->declare('v0.1.1_0');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -34,7 +34,6 @@ our $AUTHORITY = 'github:brickpool';
 # ------------------------------------------------------------------------
 
 use Carp qw( croak );
-use POSIX qw( :errno_h );
 use List::Util qw( all );
 use Params::Util qw(
   _STRING
@@ -44,8 +43,16 @@ use Params::Util qw(
   _HASH
   _INSTANCE
 );
+use POSIX qw( :errno_h );
 use threads;
+use threads::shared;
 use Thread::Queue;
+
+use Termbox::Go::Devel qw(
+  __CALLER__
+  __FUNCTION__
+  usage
+);
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
@@ -144,8 +151,6 @@ Nothing per default, but can export the following per request:
 
     :mode
       ModAlt
-      ModCtrl
-      ModShift
       ModMotion
 
     :color
@@ -208,11 +213,6 @@ Nothing per default, but can export the following per request:
     :types
       Event
       Cell
-
-    :utils
-      __CALLER__
-      __FUNCTION__
-      usage
 
     :vars
       $IsInit
@@ -328,8 +328,6 @@ our %EXPORT_TAGS = (
 
   mode => [qw(
     ModAlt
-    ModCtrl
-    ModShift
     ModMotion
   )],
 
@@ -401,14 +399,10 @@ our %EXPORT_TAGS = (
     Cell
   )],
 
-  utils => [qw(
-    __CALLER__
-    __FUNCTION__
-    usage
-  )],
-
   vars => [qw(
     $IsInit
+    $keys
+    $funcs
     $back_buffer
     $front_buffer
     $input_mode
@@ -439,69 +433,6 @@ our %EXPORT_TAGS = (
 }
 
 # ------------------------------------------------------------------------
-# Utils ------------------------------------------------------------------
-# ------------------------------------------------------------------------
-
-# Returns the context of the current pure perl subroutine call.
-sub __CALLER__ { # \% ($level|undef)
-  my $level = shift // 0;
-  my %hash; 
-  @hash{qw(
-    package filename line subroutine hasargs 
-    wantarray evaltext is_require hints bitmask hinthash
-  )} = caller($level+1);
-  return \%hash;
-}
-
-# Returns the subroutine name.
-sub __FUNCTION__ { # $subname ()
-  my $package     = __CALLER__(0)->{package}    // 'main';
-  my $subroutine  = __CALLER__(1)->{subroutine} // 'main::__ANON__';
-  return (split $package . '::', $subroutine)[-1];
-}
-
-# Print usage messages from embedded (auto)pod in file.
-sub usage { # $string ($message, $filename, $subroutine)
-  my ($msg, $file, $sub) = @_;
-  local ($!, $@);
-
-  my $autopod = eval {
-    require Pod::Autopod;
-    my $ap = Pod::Autopod->new();
-    $ap->readFile($file);
-    $ap->getPod();
-  };
-
-  my $usage = eval {
-    require Pod::Usage;
-    my $in;
-    if ($autopod) {
-      open($in, "<", \$autopod) or die $!;
-    } else {
-      open($in, "<", $file) or die $!;
-    }
-    my $text = '';
-    open(my $out, ">", \$text) or die $!;
-    Pod::Usage::pod2usage(
-      -message  => $msg,
-      -exitval  => 'NOEXIT',
-      -verbose  => 99,
-      -sections => "METHODS|FUNCTIONS/$sub",
-      -output   => $out,
-      -input    => $in,
-    );
-    close($in) or die $!;
-    close($out) or die $!;
-    # Adjust the output
-    $text =~ s/\s*$sub:\s*/\nUsage: /s;
-    $text = $1 if $text =~ /(.+?)\n\n/s;
-    $text;
-  } // $msg;
-
-  return $usage;
-}
-
-# ------------------------------------------------------------------------
 # Types ------------------------------------------------------------------
 # ------------------------------------------------------------------------
 
@@ -510,41 +441,31 @@ sub usage { # $string ($message, $filename, $subroutine)
 # 'Type' is EventResize. The 'Err' field is valid if 'Type' is EventError.
 sub Event { # \% (|\%|@)
   state $Event = {
-    Type    => 0,     # one of Event* constants
-    Mod     => 0,     # one of Mod* constants or 0
-    Key     => 0,     # one of Key* constants, invalid if 'Ch' is not 0
-    Ch      => "\0",  # a unicode character
-    Width   => 0,     # width of the screen
-    Height  => 0,     # height of the screen
-    Err     => 0,     # error in case if input failed
-    MouseX  => 0,     # x coord of mouse
-    MouseY  => 0,     # y coord of mouse
-    N       => 0,     # number of bytes written when getting a raw event
+    Type    => 0, # one of Event* constants
+    Mod     => 0, # one of Mod* constants or 0
+    Key     => 0, # one of Key* constants, invalid if 'Ch' is not 0
+    Ch      => 0, # a unicode character
+    Width   => 0, # width of the screen
+    Height  => 0, # height of the screen
+    Err     => 0, # error in case if input failed
+    MouseX  => 0, # x coord of mouse
+    MouseY  => 0, # y coord of mouse
+    N       => 0, # number of bytes written when getting a raw event
   };
   return { %$Event }
       if @_ == 0
       ;
-  return $_[0]
+  return { %$Event, %{$_[0]} }
       if @_ == 1
       && _HASH($_[0])
       && (all { exists $Event->{$_} } keys %{$_[0]})
-      && (all { defined _NONNEGINT($_[0]->{$_}) } 
-        grep { $_ !~ /Ch/ } keys %{$_[0]})
-      && (!exists($_[0]->{Ch}) || length(_STRING($_[0]->{Ch})))
+      && (all { defined _NONNEGINT($_)} values %{$_[0]})
       ;
   my $ev = {};
-  my $i = 0;
   foreach (qw( Type Mod Key Ch Width Height Err MouseX MouseY N )) {
-    last 
-        unless @_ > $i;
-    return
-        if /Ch/ && !length(_STRING($_[$i]));
-    return
-        unless defined(_NONNEGINT($_[$i]));
-    $ev->{$_} = $_[$i];
-    $i++;
+    $ev->{$_} = _NONNEGINT(shift) // return;
   }
-  return $ev;
+  return @_ ? undef : $ev;
 }
 
 # A cell, single conceptual entity on the screen. The screen is basically a 2d
@@ -552,28 +473,25 @@ sub Event { # \% (|\%|@)
 # and background attributes respectively.
 sub Cell { # \% (|\%|@)
   state $Cell = {
-    Ch => "\0",
+    Ch => 0,
     Fg => 0,
     Bg => 0,
   };
   return { %$Cell } 
       if @_ == 0
       ;
-  return $_[0] 
+  return { %$Cell, %{$_[0]} }
       if @_ == 1 
       && _HASH($_[0])
-      && (all { exists $_[0]->{$_} } keys %$Cell)
       && (all { exists $Cell->{$_} } keys %{$_[0]})
-      && length(_STRING($_[0]->{Ch}))
-      && defined(_NONNEGINT($_[0]->{Fg}))
-      && defined(_NONNEGINT($_[0]->{Fg}))
+      && (all { defined _NONNEGINT($_) } values %{$_[0]})
       ;
   return { 
-      Ch => $_[0], 
+      Ch => $_[0],
       Fg => $_[1],
       Bg => $_[2],
     } if @_ == 3
-      && length(_STRING($_[0]))
+      && defined(_NONNEGINT($_[0]))
       && defined(_NONNEGINT($_[1]))
       && defined(_NONNEGINT($_[2]))
       ;
@@ -675,9 +593,7 @@ use constant {
 # Alt modifier constant, see Event->{Mod} field and SetInputMode function.
 use constant {
   ModAlt    => 1 << 0,
-  ModCtrl   => 1 << 1,
-  ModShift  => 1 << 2,
-  ModMotion => 1 << 3,
+  ModMotion => 1 << 1,
 };
 
 # Cell colors, you can combine a color with multiple attributes using bitwise
@@ -760,17 +676,21 @@ use constant cursor_hidden => -1;
 # To know if termbox has been initialized or not
 our $IsInit = FALSE;
 
+# term specific sequences
+our $keys  = [];
+our $funcs = [];
+
 # termbox inner state
-our $back_buffer    = bless {}, 'cellbuf';
-our $front_buffer   = bless {}, 'cellbuf';
-our $input_mode     = InputEsc;
-our $output_mode    = OutputNormal;
-our $cursor_x       = cursor_hidden;
-our $cursor_y       = cursor_hidden;
-our $foreground     = ColorDefault;
-our $background     = ColorDefault;
-our $in             = 0;
-our $out            = 0;
+our $back_buffer            = bless {}, 'cellbuf';
+our $front_buffer           = bless {}, 'cellbuf';
+our $input_mode     :shared = InputEsc;
+our $output_mode            = OutputNormal;
+our $cursor_x               = cursor_hidden;
+our $cursor_y               = cursor_hidden;
+our $foreground             = ColorDefault;
+our $background             = ColorDefault;
+our $in                     = 0;
+our $out;
 our $input_comm     :shared = Thread::Queue->new();
 our $interrupt_comm :shared = Thread::Queue->new();
 
@@ -784,12 +704,12 @@ our $interrupt_comm :shared = Thread::Queue->new();
 sub cellbuf::init { # void ($self, $width, $height)
   my ($self, $width, $height) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 3                        ? EINVAL
+    $!  = @_ < 3                        ? EINVAL
         : @_ > 3                        ? E2BIG
         : !_INSTANCE($self, 'cellbuf')  ? EINVAL
         : !_POSINT($width)              ? EINVAL
         : !_POSINT($height)             ? EINVAL
-        : undef
+        : 0
         ;
 
   $self->{width} = $width;
@@ -803,12 +723,12 @@ sub cellbuf::init { # void ($self, $width, $height)
 sub cellbuf::resize { # void ($self, $width, $height)
   my ($self, $width, $height) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 3                        ? EINVAL
+    $!  = @_ < 3                        ? EINVAL
         : @_ > 3                        ? E2BIG
         : !_INSTANCE($self, 'cellbuf')  ? EINVAL
         : !_POSINT($width)              ? EINVAL
         : !_POSINT($height)             ? EINVAL
-        : undef
+        : 0
         ;
 
   q/*
@@ -847,7 +767,7 @@ sub cellbuf::resize { # void ($self, $width, $height)
       my $len = $width - $self->{width};
       my $offset = $y * $width - $len;
       my @list = map {{
-        Ch => ' ',
+        Ch => ord(' '),
         Fg => ColorDefault(),
         Bg => ColorDefault(),
       }} 1..$len;
@@ -864,7 +784,7 @@ sub cellbuf::resize { # void ($self, $width, $height)
     # height++
     my $len = $width * $height - @{ $self->{cells} };
     my @list = map {{
-      Ch => ' ',
+      Ch => ord(' '),
       Fg => ColorDefault(),
       Bg => ColorDefault(),
     }} 1..$len;
@@ -883,14 +803,14 @@ sub cellbuf::resize { # void ($self, $width, $height)
 sub cellbuf::clear { # void ($self)
   my ($self) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                        ? EINVAL
+    $!  = @_ < 1                        ? EINVAL
         : @_ > 1                        ? E2BIG
         : !_INSTANCE($self, 'cellbuf')  ? EINVAL
-        : undef
+        : 0
         ;
 
   foreach my $c (@{ $self->{cells} }) {
-    $c->{Ch} = ' ';
+    $c->{Ch} = ord(' ');
     $c->{Fg} = $foreground;
     $c->{Bg} = $background;
   }
@@ -953,11 +873,11 @@ ArgumentException->overload::OVERLOAD(
 sub AttributeToRGB { # $r, $g, $b ($attr)
   my ($attr) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-      @_ < 1                      ? EINVAL
-    : @_ > 1                      ? E2BIG
-    : !defined(_NONNEGINT($attr)) ? EINVAL
-    : (undef $!)
-    ;
+    $!  = @_ < 1                      ? EINVAL
+        : @_ > 1                      ? E2BIG
+        : !defined(_NONNEGINT($attr)) ? EINVAL
+        : 0
+        ;
   
   my $color = int($attr / max_attr);
   # Have to right-shift with the highest attribute bit.
@@ -975,13 +895,13 @@ sub AttributeToRGB { # $r, $g, $b ($attr)
 sub RGBToAttribute { # $attr ($r, $g, $b)
   my ($r, $g, $b) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-      @_ < 3                    ? EINVAL
-    : @_ > 3                    ? E2BIG
-    : !defined(_NONNEGINT($r))  ? EINVAL
-    : !defined(_NONNEGINT($g))  ? EINVAL
-    : !defined(_NONNEGINT($b))  ? EINVAL
-    : (undef $!)
-    ;
+    $!  = @_ < 3                    ? EINVAL
+        : @_ > 3                    ? E2BIG
+        : !defined(_NONNEGINT($r))  ? EINVAL
+        : !defined(_NONNEGINT($g))  ? EINVAL
+        : !defined(_NONNEGINT($b))  ? EINVAL
+        : 0
+        ;
 
   my $color = int($b);
   $color += int($g) << 8;
@@ -1000,12 +920,12 @@ sub RGBToAttribute { # $attr ($r, $g, $b)
 sub is_cursor_hidden { # $bool ($x, $y)
   my ($x, $y) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-      @_ < 2                ? EINVAL
-    : @_ > 2                ? E2BIG
-    : !defined(_NUMBER($x)) ? EINVAL
-    : !defined(_NUMBER($y)) ? EINVAL
-    : (undef $!)
-    ;
+    $!  = @_ < 2                ? EINVAL
+        : @_ > 2                ? E2BIG
+        : !defined(_NUMBER($x)) ? EINVAL
+        : !defined(_NUMBER($y)) ? EINVAL
+        : 0
+        ;
 
   return $x == cursor_hidden || $y == cursor_hidden
 }

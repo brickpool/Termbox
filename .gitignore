@@ -35,6 +35,7 @@ inc/
 /*.zip
 
 # Develop
+/*.code-workspace
 .vscode
 /src
 /trial

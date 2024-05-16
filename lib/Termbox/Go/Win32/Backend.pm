@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.1.0_0');
+our $VERSION = version->declare('v0.1.1_0');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -55,6 +55,7 @@ use Params::Util qw(
 use POSIX qw( :errno_h );
 use Scalar::Util qw( readonly );
 use threads;
+use threads::shared;
 use Thread::Queue;
 use Unicode::EastAsianWidth;
 use Unicode::EastAsianWidth::Detect qw( is_cjk_lang );
@@ -63,6 +64,10 @@ use Win32::API;
 use Win32::Console;
 
 use Termbox::Go::Common qw( :all );
+use Termbox::Go::Devel qw(
+  __FUNCTION__
+  usage
+);
 use Termbox::Go::WCWidth qw( wcwidth );
 
 # ------------------------------------------------------------------------
@@ -348,15 +353,16 @@ sub char_info { # \%|undef (|@|\%)
   return $_[0] 
       if @_ == 1 
       && _HASH($_[0])
-      && (all { exists $_[0]->{$_} } keys %$char_info)
-      && (all { exists $char_info->{$_} } keys %{$_[0]})
-      && (all { defined _NONNEGINT($_) } values %{$_[0]})
+      && keys(%$char_info) == keys(%{$_[0]})
+      && (!STRICT or all { exists $_[0]->{$_} } keys %$char_info)
+      && (!STRICT or all { exists $char_info->{$_} } keys %{$_[0]})
+      && (!STRICT or all { defined _NONNEGINT($_) } values %{$_[0]})
       ;
   return { 
       char => $_[0],
       attr => $_[1],
     } if @_ == 2
-      && (all { defined _NONNEGINT($_) } @_)
+      && (!STRICT or all { defined _NONNEGINT($_) } @_)
       ;
   return;
 }
@@ -376,15 +382,16 @@ sub coord { # \%|undef (|@|\%)
   return $_[0] 
       if @_ == 1
       && _HASH($_[0])
-      && (all { exists $_[0]->{$_} } keys %$coord)
-      && (all { exists $coord->{$_} } keys %{$_[0]})
-      && (all { defined _NONNEGINT($_) } values %{$_[0]})
+      && keys(%$coord) == keys(%{$_[0]})
+      && (!STRICT or all { exists $_[0]->{$_} } keys %$coord)
+      && (!STRICT or all { exists $coord->{$_} } keys %{$_[0]})
+      && (!STRICT or all { defined _NONNEGINT($_) } values %{$_[0]})
       ;
   return { 
       x => $_[0], 
       y => $_[1],
     } if @_ == 2 
-      && (all { defined _NONNEGINT($_) } @_)
+      && (!STRICT or all { defined _NONNEGINT($_) } @_)
       ;
   return;
 }
@@ -416,9 +423,10 @@ sub small_rect { # \%|undef (|@|\%)
   return $_[0] 
       if @_ == 1 
       && _HASH($_[0])
-      && (all { exists $_[0]->{$_} } keys %$small_rect)
-      && (all { exists $small_rect->{$_} } keys %{$_[0]})
-      && (all { defined _NONNEGINT($_) } values %{$_[0]})
+      && keys(%$small_rect) == keys(%{$_[0]})
+      && (!STRICT or all { exists $_[0]->{$_} } keys %$small_rect)
+      && (!STRICT or all { exists $small_rect->{$_} } keys %{$_[0]})
+      && (!STRICT or all { defined _NONNEGINT($_) } values %{$_[0]})
       ;
   return { 
     left   => $_[0],
@@ -426,7 +434,7 @@ sub small_rect { # \%|undef (|@|\%)
     right  => $_[2],
     bottom => $_[3],
     } if @_ == 4
-      && (all { defined _NONNEGINT($_) } @_)
+      && (!STRICT or all { defined _NONNEGINT($_) } @_)
       ;
   return;
 
@@ -724,19 +732,19 @@ use constant {
 # Variables ---------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-our $is_cjk           = is_cjk_lang();
-our $orig_cursor_info = {}; # console_cursor_info;
-our $orig_size        = {}; # coord;
-our $orig_window      = {}; # small_rect;
-our $orig_mode        = 0;
-our $orig_screen      = 0;  # syscallHandle
-our $term_size        = {}; # coord;
-our $interrupt        = 0;  # syscallHandle
-our $charbuf          = []; # char_info
-our $diffbuf          = []; # diff_msg
-our $cancel_comm      = $_ = Thread::Queue->new(); $_->limit(1);
-our $cancel_done_comm = Thread::Queue->new();
-my $alt_mode_esc      = FALSE;
+our $is_cjk               = is_cjk_lang();
+our $orig_cursor_info     = {}; # console_cursor_info;
+our $orig_size            = {}; # coord;
+our $orig_window          = {}; # small_rect;
+our $orig_mode            = 0;
+our $orig_screen          = 0;  # syscallHandle
+our $term_size            = {}; # coord;
+our $interrupt            = 0;  # syscallHandle
+our $charbuf              = []; # char_info
+our $diffbuf              = []; # diff_msg
+our $cancel_comm          = $_ = Thread::Queue->new(); $_->limit(1);
+our $cancel_done_comm     = Thread::Queue->new();
+my $alt_mode_esc  :shared = FALSE;
 
 # these ones just to prevent heap allocs at all costs
 my $tmp_info   = {}; # console_screen_buffer_info
@@ -893,15 +901,15 @@ sub set_console_active_screen_buffer { # $bSucceeded ($hConsoleOutput)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub set_console_screen_buffer_size { # $bSucceeded ($hConsoleOutput, \%dwSize)
   my ($h, $size) = @_;
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
-    $^E = @_ != 2         ? ERROR_BAD_ARGUMENTS
-        : !_POSINT($h)    ? ERROR_INVALID_HANDLE
-        : !coord($size)   ? ERROR_INVALID_PARAMETER
+    $^E = @_ != 2       ? ERROR_BAD_ARGUMENTS
+        : !_POSINT($h)  ? ERROR_INVALID_HANDLE
+        : !coord($size) ? ERROR_INVALID_PARAMETER
         : 0
         ;
 
@@ -916,7 +924,7 @@ sub set_console_screen_buffer_size { # $bSucceeded ($hConsoleOutput, \%dwSize)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub set_console_window_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleWindow)
@@ -942,7 +950,7 @@ sub set_console_window_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleWindow)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub create_console_screen_buffer { # $handle|undef ()
@@ -1009,7 +1017,7 @@ sub get_console_screen_buffer_info { # $bSucceeded ($hConsoleOutput, \%lpConsole
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub write_console_output { # $bSucceeded ($hConsoleOutput, $lpBuffer, \%lpWriteRegion)
@@ -1017,7 +1025,7 @@ sub write_console_output { # $bSucceeded ($hConsoleOutput, $lpBuffer, \%lpWriteR
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
     $^E = @_ != 3                   ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)              ? ERROR_INVALID_HANDLE
-        : !length(_STRING($chars))  ? ERROR_INVALID_PARAMETER
+        : !defined(_STRING($chars)) ? ERROR_INVALID_PARAMETER
         : bytes::length($chars) < 4 ? ERROR_INVALID_DATA
         : !small_rect($dst)         ? ERROR_INVALID_PARAMETER
         : 0
@@ -1055,7 +1063,7 @@ sub write_console_output { # $bSucceeded ($hConsoleOutput, $lpBuffer, \%lpWriteR
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub write_console_output_character { # $bSucceeded ($hConsoleOutput, $lpCharacter, \%dwWriteCoord)
@@ -1063,8 +1071,7 @@ sub write_console_output_character { # $bSucceeded ($hConsoleOutput, $lpCharacte
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
     $^E = @_ != 3                   ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)              ? ERROR_INVALID_HANDLE
-        : !length(_STRING($chars))  ? ERROR_INVALID_PARAMETER
-        : length($chars) == 0       ? ERROR_INVALID_DATA
+        : !defined(_STRING($chars)) ? ERROR_INVALID_PARAMETER
         : !coord($pos)              ? ERROR_INVALID_PARAMETER
         : 0
         ;
@@ -1081,7 +1088,7 @@ sub write_console_output_character { # $bSucceeded ($hConsoleOutput, $lpCharacte
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub write_console_output_attribute { # $bSucceeded ($hConsoleOutput, $lpAttribute, \%dwWriteCoord)
@@ -1106,7 +1113,7 @@ sub write_console_output_attribute { # $bSucceeded ($hConsoleOutput, $lpAttribut
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub set_console_cursor_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleCursorInfo)
@@ -1131,7 +1138,7 @@ sub set_console_cursor_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleCursorI
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub get_console_cursor_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleCursorInfo)
@@ -1162,17 +1169,17 @@ sub get_console_cursor_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleCursorI
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub set_console_cursor_position { # $bSucceeded ($hConsoleOutput, $dwCursorPosition)
   my ($h, $pos) = @_;
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
     $^E = @_ != 2       ? ERROR_BAD_ARGUMENTS
-    : !_POSINT($h)  ? ERROR_INVALID_HANDLE
-    : !coord($pos)  ? ERROR_INVALID_PARAMETER
-    : 0
-    ;
+        : !_POSINT($h)  ? ERROR_INVALID_HANDLE
+        : !coord($pos)  ? ERROR_INVALID_PARAMETER
+        : 0
+        ;
 
   my $err;
   my $r0 = $proc_set_console_cursor_position->(
@@ -1186,7 +1193,7 @@ sub set_console_cursor_position { # $bSucceeded ($hConsoleOutput, $dwCursorPosit
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
@@ -1211,7 +1218,7 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
       $record->{event_type} = $lpBuffer->{EventType};
       $lpBuffer->{EventType} = 0;
       switch: for ($record->{event_type}) {
-        case: $_ == key_event and do {
+        case: key_event == $_ and do {
           $record->{event} = {
             key_down          => $lpBuffer->{d0},
             repeat_count      => $lpBuffer->{w1},
@@ -1223,7 +1230,7 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
           map { $lpBuffer->{$_} = 0 } qw( d0 w1 w2 w3 w4 d5 );
           last;
         };
-        case: $_ == mouse_event and do {
+        case: mouse_event == $_ and do {
           my ($x, $y) = unpack('SS', pack('V', $lpBuffer->{d0}));
           $record->{event} = {
             mouse_pos => {
@@ -1237,7 +1244,7 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
           map { $lpBuffer->{$_} = 0 } qw( d0 w1 w3 d5 );
           last;
         };
-        case: $_ == window_buffer_size_event and do {
+        case: window_buffer_size_event == $_ and do {
           my ($x, $y) = unpack('SS', pack('V', $lpBuffer->{d0}));
           $record->{event} = {
             size => {
@@ -1259,16 +1266,16 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub get_console_mode { # $bSucceeded ($hConsoleHandle, \$lpMode)
   my ($h, $mode) = @_;
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
-    $^E = @_ != 2           ? ERROR_BAD_ARGUMENTS
-        : !_POSINT($h)      ? ERROR_INVALID_HANDLE
-        : !_SCALAR0($mode)  ? ERROR_INVALID_PARAMETER
-        : readonly($$mode)  ? ERROR_INVALID_CRUNTIME_PARAMETER
+    $^E = @_ != 2                   ? ERROR_BAD_ARGUMENTS
+        : !_POSINT($h)              ? ERROR_INVALID_HANDLE
+        : !defined(_SCALAR0($mode)) ? ERROR_INVALID_PARAMETER
+        : readonly($$mode)          ? ERROR_INVALID_CRUNTIME_PARAMETER
         : 0
         ;
 
@@ -1286,7 +1293,7 @@ sub get_console_mode { # $bSucceeded ($hConsoleHandle, \$lpMode)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub set_console_mode { # $bSucceeded ($hConsoleHandle, $lpMode)
@@ -1308,7 +1315,7 @@ sub set_console_mode { # $bSucceeded ($hConsoleHandle, $lpMode)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub fill_console_output_character { # $bSucceeded ($hConsoleOutput, $cCharacter, $nLength)
@@ -1316,7 +1323,7 @@ sub fill_console_output_character { # $bSucceeded ($hConsoleOutput, $cCharacter,
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
     $^E = @_ != 3                   ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)              ? ERROR_INVALID_HANDLE
-        : !length(_STRING($char))   ? ERROR_INVALID_PARAMETER
+        : !defined(_STRING($char))  ? ERROR_INVALID_PARAMETER
         : length($char) != 1        ? ERROR_INVALID_DATA
         : !defined(_NONNEGINT($n))  ? ERROR_INVALID_PARAMETER
         : 0
@@ -1335,7 +1342,7 @@ sub fill_console_output_character { # $bSucceeded ($hConsoleOutput, $cCharacter,
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub fill_console_output_attribute { # $bSucceeded ($hConsoleOutput, $wAttribute, $nLength)
@@ -1361,7 +1368,7 @@ sub fill_console_output_attribute { # $bSucceeded ($hConsoleOutput, $wAttribute,
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub create_event { # $handle|undef ()
@@ -1384,9 +1391,9 @@ sub create_event { # $handle|undef ()
 sub wait_for_multiple_objects { # $bSucceeded (\@lpHandles)
   my ($objects) = @_;
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
-    $^E = @_ != 1                             ? ERROR_BAD_ARGUMENTS
-        : !_ARRAY($objects)                   ? ERROR_INVALID_PARAMETER
-        : (any { not _POSINT($_) } @$objects) ? ERROR_INVALID_DATA
+    $^E = @_ != 1                           ? ERROR_BAD_ARGUMENTS
+        : !defined(_ARRAY($objects))        ? ERROR_INVALID_PARAMETER
+        : !(any { _POSINT($_) } @$objects)  ? ERROR_INVALID_DATA
         : 0
         ;
 
@@ -1414,7 +1421,7 @@ sub wait_for_multiple_objects { # $bSucceeded (\@lpHandles)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub set_event { # $bSucceeded ($hEvent)
@@ -1435,7 +1442,7 @@ sub set_event { # $bSucceeded ($hEvent)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 sub get_current_console_font { # $bSucceeded ($hConsoleOutput, \%dwFontSize)
@@ -1472,7 +1479,7 @@ sub get_current_console_font { # $bSucceeded ($hConsoleOutput, \%dwFontSize)
       $err = $^E = WSAEINVAL;
     }
   }
-  $err ? return : !0;
+  $err ? return : "0E0";
 }
 
 # ------------------------------------------------------------------------
@@ -1483,10 +1490,10 @@ sub get_current_console_font { # $bSucceeded ($hConsoleOutput, \%dwFontSize)
 sub get_cursor_position { # \%dwCursorPosition ($hConsoleOutput)
   my ($out) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1          ? EINVAL
+    $!  = @_ < 1          ? EINVAL
         : @_ > 1          ? E2BIG
         : !_POSINT($out)  ? EBADF
-        : undef
+        : 0
         ;
 
   get_console_screen_buffer_info($out, $tmp_info)
@@ -1497,10 +1504,10 @@ sub get_cursor_position { # \%dwCursorPosition ($hConsoleOutput)
 sub get_term_size { # \%dwSize, \%srWindow ($hConsoleOutput)
   my ($out) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1          ? EINVAL
+    $!  = @_ < 1          ? EINVAL
         : @_ > 1          ? E2BIG
         : !_POSINT($out)  ? EBADF
-        : undef
+        : 0
         ;
 
   get_console_screen_buffer_info($out, $tmp_info)
@@ -1514,10 +1521,10 @@ sub get_term_size { # \%dwSize, \%srWindow ($hConsoleOutput)
 sub get_win_min_size { # \%dwSize ($hConsoleOutput)
   my ($out) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1          ? EINVAL
+    $!  = @_ < 1          ? EINVAL
         : @_ > 1          ? E2BIG
         : !_POSINT($out)  ? EBADF
-        : undef
+        : 0
         ;
 
   my $x = $get_system_metrics->(SM_CXMIN) || 0;
@@ -1544,10 +1551,10 @@ sub get_win_min_size { # \%dwSize ($hConsoleOutput)
 sub get_win_size { # \%dwSize ($hConsoleOutput)
   my ($out) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1          ? EINVAL
+    $!  = @_ < 1          ? EINVAL
         : @_ > 1          ? E2BIG
         : !_POSINT($out)  ? EBADF
-        : undef
+        : 0
         ;
 
   get_console_screen_buffer_info($out, $tmp_info)
@@ -1574,12 +1581,12 @@ sub get_win_size { # \%dwSize ($hConsoleOutput)
 sub fix_win_size { # $bSucceeded ($hConsoleOutput, \%dwSize)
   my ($out, $size) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2            ? EINVAL
+    $!  = @_ < 2            ? EINVAL
         : @_ > 2            ? E2BIG
         : !_POSINT($out)    ? EBADF
         : !coord($size)     ? EINVAL
         : readonly(%$size)  ? EFAULT
-        : undef
+        : 0
         ;
 
   my $window = small_rect();
@@ -1591,8 +1598,8 @@ sub fix_win_size { # $bSucceeded ($hConsoleOutput, \%dwSize)
 }
 
 sub update_size_maybe { # $bSucceeded ()
-  (STRICT ? croak("$!") : return) if
-    $! = @_ ? E2BIG : undef;
+  croak(usage("$!", __FILE__, __FUNCTION__)) if
+    $! = @_ ? E2BIG : 0;
 
   my $size = get_win_size($out);
   if ($size->{x} != $term_size->{x} || $size->{y} != $term_size->{y}) {
@@ -1609,23 +1616,26 @@ sub update_size_maybe { # $bSucceeded ()
       $charbuf = [];
     }
   }
-  return !0;
+  return "0E0";
 }
 
 sub append_diff_line { # $nColumns ($wRow)
   my ($y) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                    ? EINVAL
+    $!  = @_ < 1                    ? EINVAL
         : @_ > 1                    ? E2BIG
         : !defined(_NONNEGINT($y))  ? EINVAL
-        : undef
+        : 0
         ;
 
   my $n = 0;
-  for (my $x = 0; $x < $front_buffer->{width}; ) {
-    my $cell_offset = $y*$front_buffer->{width} + $x;
-    my $back = $back_buffer->{cells}->[$cell_offset];
-    my $front = $front_buffer->{cells}->[$cell_offset];
+  my $width = $front_buffer->{width};
+  my $back_buffer_cells = $back_buffer->{cells};
+  my $front_buffer_cells = $front_buffer->{cells};
+  my $cell_offset = $y*$width;
+  for my $x (0..$width-1) {
+    my $back = $back_buffer_cells->[$cell_offset];
+    my $front = $front_buffer_cells->[$cell_offset];
     my ($attr, $char) = cell_to_char_info($back);
     push @$charbuf, char_info{attr => $attr, char => $char};
     map { $front->{$_} = $back->{$_} } keys %$back;
@@ -1633,24 +1643,24 @@ sub append_diff_line { # $nColumns ($wRow)
     {
       require Data::Dumper;
       local $Data::Dumper::Varname = 'pos';
-      STDERR->say(Data::Dumper::Dumper({ x => $x, y => $y }));
+      Win32::OutputDebugString(Data::Dumper::Dumper({ x => $x, y => $y }));
       local $Data::Dumper::Varname = 'back_buffer';
-      STDERR->say(Data::Dumper::Dumper($back_buffer->{cells}->[$cell_offset]));
+      Win32::OutputDebugString(Data::Dumper::Dumper($back_buffer->{cells}->[$cell_offset]));
       local $Data::Dumper::Varname = 'char_info';
-      STDERR->say(Data::Dumper::Dumper([ char_info{ attr => $attr, char => $char } ]));
+      Win32::OutputDebugString(Data::Dumper::Dumper([ char_info{ attr => $attr, char => $char } ]));
     }
     */ if 0;
     $n++;
-    my $w = wcwidth(ord $back->{Ch});
-    if ($w <= 0 || $w == 2 && $back->{Ch} =~ /\p{InEastAsianAmbiguous}/) {
+    my $w = wcwidth($back->{Ch});
+    if ($w <= 0 || $w == 2 && chr($back->{Ch}) =~ /\p{InEastAsianAmbiguous}/) {
       $w = 1;
     }
     $x += $w;
     # If not CJK, fill trailing space with whitespace
-	  if (!$is_cjk && $w == 2) {
-		  push @$charbuf, char_info{attr => $attr, char => ord(' ')};
-		}
-  }
+    if (!$is_cjk && $w == 2) {
+      push @$charbuf, char_info{attr => $attr, char => ord(' ')};
+    }
+  } continue { $cell_offset++ }
   return $n;
 }
 
@@ -1658,7 +1668,7 @@ sub append_diff_line { # $nColumns ($wRow)
 # 'diff_msg's in the 'diff_buf'
 sub prepare_diff_messages { # $bSucceeded ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   # clear buffers
   $diffbuf = [];
@@ -1666,28 +1676,35 @@ sub prepare_diff_messages { # $bSucceeded ()
 
   my $diff = diff_msg();
   my $gbeg = 0;
-  for (my $y = 0; $y < $front_buffer->{height}; $y++) {
+  my $height = $front_buffer->{height};
+  my $width = $front_buffer->{width};
+  my $back_buffer_cells = $back_buffer->{cells};
+  my $front_buffer_cells = $front_buffer->{cells};
+  my $line_offset = 0;
+  for my $y (0..$height-1) {
     my $same = TRUE;
-    my $line_offset = $y * $front_buffer->{width};
-    for (my $x = 0; $x < $front_buffer->{width}; $x++) {
-      my $cell_offset = $line_offset + $x;
-      my $back = $back_buffer->{cells}->[$cell_offset];
-      my $front = $front_buffer->{cells}->[$cell_offset];
+    my $cell_offset = $line_offset;
+    for my $x (0..$width-1) {
+      my $back = $back_buffer_cells->[$cell_offset];
+      my $front = $front_buffer_cells->[$cell_offset];
       q/*
       {
         require Data::Dumper;
         use warnings FATAL => 'all';
         local $Data::Dumper::Varname = 'back';
-        STDERR->say(Data::Dumper::Dumper($back));
+        Win32::OutputDebugString(Data::Dumper::Dumper($back));
         local $Data::Dumper::Varname = 'front';
-        STDERR->say(Data::Dumper::Dumper($front));
+        Win32::OutputDebugString(Data::Dumper::Dumper($front));
       }
       */ if 0;
-      if ( any { $back->{$_} ne $front->{$_} } keys(%$back) ) {
+      if ( $back->{Ch} != $front->{Ch}
+        || $back->{Fg} != $front->{Fg}
+        || $back->{Bg} != $front->{Bg}
+      ) {
         $same = FALSE;
         last;
       }
-    }
+    } continue { $cell_offset++ }
     if ($same && $diff->{lines} > 0) {
       push @$diffbuf, $diff;
       $diff = diff_msg();
@@ -1702,22 +1719,22 @@ sub prepare_diff_messages { # $bSucceeded ()
       $diff->{lines}++;
       $diff->{chars} = [ @$charbuf[$gbeg..$end-1] ];
     }
-  }
+  } continue { $line_offset += $width }
   if ($diff->{lines} > 0) {
     push @$diffbuf, $diff;
     $diff = diff_msg();
   }
-  return !0;
+  return "0E0";
 }
 
 sub get_ct { # $uColor (\%rgColorTable, $iColor)
   my ($table, $idx) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                      ? EINVAL
+  croak(usage("$!", __FILE__, __FUNCTION__)) if STRICT and
+    $!  = @_ < 2                      ? EINVAL
         : @_ > 2                      ? E2BIG
-        : !_ARRAY($table)             ? EINVAL
+        : !defined(_ARRAY($table))    ? EINVAL
         : !defined(_NONNEGINT($idx))  ? EINVAL
-        : undef
+        : 0
         ;
 
   $idx &= 0x0f;
@@ -1729,11 +1746,11 @@ sub get_ct { # $uColor (\%rgColorTable, $iColor)
 
 sub cell_to_char_info { # $uAttributes, $uChar (\%Cell)
   my ($c) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1    ? EINVAL
+  croak(usage("$!", __FILE__, __FUNCTION__)) if STRICT and
+    $!  = @_ < 1    ? EINVAL
         : @_ > 1    ? E2BIG
         : !Cell($c) ? EINVAL
-        : undef
+        : 0
         ;
 
   my $attr =  get_ct($color_table_fg, $c->{Fg})
@@ -1750,9 +1767,9 @@ sub cell_to_char_info { # $uAttributes, $uChar (\%Cell)
 
   # This works in the basic multilingual plane but will fail with anything else
   # https://stackoverflow.com/a/63968958
-  my $wc = ord($c->{Ch});
+  my $wc = $c->{Ch};
   if ($wc > 0xffff) {
-    my ($r0, $r1) = unpack('S*', Encode::encode("UTF-16LE", $c->{Ch}));
+    my ($r0, $r1) = unpack('S*', Encode::encode("UTF-16LE", chr($c->{Ch})));
     $wc = 0xfffd if $r0 == 0xfffd;
   }
   return ($attr, $wc);
@@ -1761,24 +1778,25 @@ sub cell_to_char_info { # $uAttributes, $uChar (\%Cell)
 sub move_cursor { # $bSucceeded ($uLeft, $uTop)
   my ($x, $y) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                    ? EINVAL
+    $!  = @_ < 2                    ? EINVAL
         : @_ > 2                    ? E2BIG
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
-        : undef
+        : 0
         ;
 
   set_console_cursor_position($out, coord($x, $y))
     or die $^E;
-  return !0;
+  return "0E0";
 }
 
 sub show_cursor { # $bSucceeded ($bVisible)
   my ($visible) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1 ? EINVAL
-        : @_ > 1 ? E2BIG
-        : undef
+    $!  = @_ < 1        ? EINVAL
+        : @_ > 1        ? E2BIG
+        : ref($visible) ? EINVAL
+        : 0
         ;
 
   my $v = $visible ? 1 : 0;
@@ -1788,12 +1806,12 @@ sub show_cursor { # $bSucceeded ($bVisible)
   $info->{visible} = $v;
   set_console_cursor_info($out, $info)
     or die $^E;
-  return !0;
+  return "0E0";
 }
 
 sub clear { # $bSucceeded ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   my $char = ' ';
   my $attr = $foreground | $background;
@@ -1806,16 +1824,16 @@ sub clear { # $bSucceeded ()
   if (!is_cursor_hidden($cursor_x, $cursor_y)) {
     move_cursor($cursor_x, $cursor_y);
   }
-  return !0;
+  return "0E0";
 }
 
 sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
   my ($r) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                ? EINVAL
+    $!  = @_ < 1                ? EINVAL
         : @_ > 1                ? E2BIG
         : !key_event_record($r) ? EINVAL
-        : undef
+        : 0
         ;
   
   if ($r->{key_down} == 0) {
@@ -1823,72 +1841,69 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
   }
 
   my $e = Event{Type => EventKey};
-  if ($input_mode & InputAlt) {
-    if ($alt_mode_esc) {
-      $e->{Mod} = ModAlt;
-      $alt_mode_esc = FALSE;
+  {
+    lock $input_mode;
+    if ($input_mode & InputAlt) {
+      if ($alt_mode_esc) {
+        $e->{Mod} = ModAlt;
+        $alt_mode_esc = FALSE;
+      }
+      if ($r->{control_key_state} & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) {
+        $e->{Mod} = ModAlt;
+      }
     }
-    if ($r->{control_key_state} & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) {
-      $e->{Mod} = ModAlt;
-    }
-  }
+  }  
 
   my $ctrlpressed = $r->{control_key_state}
                   & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED);
-  if ($ctrlpressed) {
-    $e->{Mod} |= ModCtrl;
-  }
-  if ($r->{control_key_state} & SHIFT_PRESSED) {
-    $e->{Mod} |= ModShift;
-  }
 
   if ($r->{virtual_key_code} >= vk_f1 && $r->{virtual_key_code} <= vk_f12) {
     switch: for ($r->{virtual_key_code}) {
-      case: $_ == vk_f1 and do {
+      case: vk_f1 == $_ and do {
         $e->{Key} = KeyF1;
         last;
       };
-      case: $_ == vk_f2 and do {
+      case: vk_f2 == $_ and do {
         $e->{Key} = KeyF2;
         last;
       };
-      case: $_ == vk_f3 and do {
+      case: vk_f3 == $_ and do {
         $e->{Key} = KeyF3;
         last;
       };
-      case: $_ == vk_f4 and do {
+      case: vk_f4 == $_ and do {
         $e->{Key} = KeyF4;
         last;
       };
-      case: $_ == vk_f5 and do {
+      case: vk_f5 == $_ and do {
         $e->{Key} = KeyF5;
         last;
       };
-      case: $_ == vk_f6 and do {
+      case: vk_f6 == $_ and do {
         $e->{Key} = KeyF6;
         last;
       };
-      case: $_ == vk_f7 and do {
+      case: vk_f7 == $_ and do {
         $e->{Key} = KeyF7;
         last;
       };
-      case: $_ == vk_f8 and do {
+      case: vk_f8 == $_ and do {
         $e->{Key} = KeyF8;
         last;
       };
-      case: $_ == vk_f9 and do {
+      case: vk_f9 == $_ and do {
         $e->{Key} = KeyF9;
         last;
       };
-      case: $_ == vk_f10 and do {
+      case: vk_f10 == $_ and do {
         $e->{Key} = KeyF10;
         last;
       };
-      case: $_ == vk_f11 and do {
+      case: vk_f11 == $_ and do {
         $e->{Key} = KeyF11;
         last;
       };
-      case: $_ == vk_f12 and do {
+      case: vk_f12 == $_ and do {
         $e->{Key} = KeyF12;
         last;
       };
@@ -1902,47 +1917,47 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
 
   if ($r->{virtual_key_code} <= vk_delete) {
     switch: for ($r->{virtual_key_code}) {
-      case: $_ == vk_insert and do {
+      case: vk_insert == $_ and do {
         $e->{Key} = KeyInsert;
         last;
       };
-      case: $_ == vk_delete and do {
+      case: vk_delete == $_ and do {
         $e->{Key} = KeyDelete;
         last;
       };
-      case: $_ == vk_home and do {
+      case: vk_home == $_ and do {
         $e->{Key} = KeyHome;
         last;
       };
-      case: $_ == vk_end and do {
+      case: vk_end == $_ and do {
         $e->{Key} = KeyEnd;
         last;
       };
-      case: $_ == vk_pgup and do {
+      case: vk_pgup == $_ and do {
         $e->{Key} = KeyPgup;
         last;
       };
-      case: $_ == vk_pgdn and do {
+      case: vk_pgdn == $_ and do {
         $e->{Key} = KeyPgdn;
         last;
       };
-      case: $_ == vk_arrow_up and do {
+      case: vk_arrow_up == $_ and do {
         $e->{Key} = KeyArrowUp;
         last;
       };
-      case: $_ == vk_arrow_down and do {
+      case: vk_arrow_down == $_ and do {
         $e->{Key} = KeyArrowDown;
         last;
       };
-      case: $_ == vk_arrow_left and do {
+      case: vk_arrow_left == $_ and do {
         $e->{Key} = KeyArrowLeft;
         last;
       };
-      case: $_ == vk_arrow_right and do {
+      case: vk_arrow_right == $_ and do {
         $e->{Key} = KeyArrowRight;
         last;
       };
-      case: $_ == vk_backspace and do {
+      case: vk_backspace == $_ and do {
         if ($ctrlpressed) {
           $e->{Key} = KeyBackspace2;
         } else {
@@ -1950,11 +1965,11 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
         }
         last;
       };
-      case: $_ == vk_tab and do {
+      case: vk_tab == $_ and do {
         $e->{Key} = KeyTab;
         last;
       };
-      case: $_ == vk_enter and do {
+      case: vk_enter == $_ and do {
         if ($ctrlpressed) {
           $e->{Key} = KeyCtrlJ;
         } else {
@@ -1962,7 +1977,8 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
         }
         last;
       };
-      case: $_ == vk_esc and do {
+      case: vk_esc == $_ and do {
+        lock $input_mode;
         if ($input_mode & InputEsc) {
           $e->{Key} = KeyEsc;
         } elsif ($input_mode & InputAlt) {
@@ -1971,7 +1987,7 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
         }
         last;
       };
-      case: $_ == vk_space and do {
+      case: vk_space == $_ and do {
         if ($ctrlpressed) {
           # manual return here, because KeyCtrlSpace is zero
           $e->{Key} = KeyCtrlSpace;
@@ -1992,8 +2008,9 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
     if ( $r->{unicode_char} >= KeyCtrlA
       && $r->{unicode_char} <= KeyCtrlRsqBracket
     ) {
+      lock $input_mode;
       $e->{Key} = $r->{unicode_char};
-      if ($input_mode & InputAlt && $e->{Key} == KeyEsc) {
+      if (($input_mode & InputAlt) && $e->{Key} == KeyEsc) {
         $alt_mode_esc = TRUE;
         return (Event(), FALSE);
       }
@@ -2006,7 +2023,8 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
         $e->{Key} = KeyCtrl2;
         return ($e, TRUE);
       };
-      case: $_ == 51 and do {
+      case: 51 == $_ and do {
+        lock $input_mode;
         if ($input_mode & InputAlt) {
           $alt_mode_esc = TRUE;
           return (Event(), FALSE);
@@ -2014,15 +2032,15 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
         $e->{Key} = KeyCtrl3;
         last;
       };
-      case: $_ == 52 and do {
+      case: 52 == $_ and do {
         $e->{Key} = KeyCtrl4;
         last;
       };
-      case: $_ == 53 and do {
+      case: 53 == $_ and do {
         $e->{Key} = KeyCtrl5;
         last;
       };
-      case: $_ == 54 and do {
+      case: 54 == $_ and do {
         $e->{Key} = KeyCtrl6;
         last;
       };
@@ -2042,16 +2060,14 @@ sub key_event_record_to_event { # \%Event, $bSucceeded (\%lpBuffer)
   }
 
   if ($r->{unicode_char}) {
-    # https://stackoverflow.com/a/12291409
-    $e->{Ch} = Encode::encode("UTF-8", chr($r->{unicode_char}));
+    $e->{Ch} = $r->{unicode_char};
     return ($e, TRUE);
   }
 
   return (Event(), FALSE);
 }
 
-sub input_event_producer { # $result ()
-  threads->detach();
+sub input_event_producer { # $bSucceeded ()
   my $r;
   my $last_button;
   my $last_button_pressed;
@@ -2060,39 +2076,41 @@ sub input_event_producer { # $result ()
   my $handles = [$in, $interrupt];
   LOOP: for (;;) {
     if (!wait_for_multiple_objects($handles)) {
+      lock $input_comm;
       $input_comm->enqueue( Event{Type => EventError, Err => $^E} );
-      # STDERR->say('input_comm: ', $^E);
+      # Win32::OutputDebugString(§input_comm: $^E");
     }
 
     select: {
       case: $cancel_comm->dequeue_nb() and do {
         $cancel_done_comm->enqueue(TRUE);
-        # STDERR->say('cancel_comm: TRUE');
+        # Win32::OutputDebugString('cancel_comm: TRUE');
         return;
       }
     }
 
     if (!read_console_input($in, $r = {})) {
+      lock $input_comm;
       $input_comm->enqueue( Event{Type => EventError, Err => $^E} );
-      # STDERR->say('input_comm: ', $^E);
+      # Win32::OutputDebugString(§input_comm: $^E");
     }
 
     switch: for ($r->{event_type}) {
-      case: $_ == key_event and do {
+      case: key_event == $_ and do {
         my $kr = key_event_record($r->{event});
+        # Win32::OutputDebugString("input_comm: @{[%$kr]}");
         my ($ev, $ok) = key_event_record_to_event($kr);
         if ($ok) {
+          lock $input_comm;
           for (my $i = 0; $i < $kr->{repeat_count}; $i++) {
             $input_comm->enqueue({ %$ev });
-            q/*
-            local $Data::Dumper::Varname = 'key_event';
-            STDERR->print('input_comm: ', Dumper $ev);
-            */ if 0;
+            # Win32::OutputDebugString("input_comm: @{[%$ev]}");
           }
         }
         last;
       };
-      case: $_ == window_buffer_size_event and do {
+      case: window_buffer_size_event == $_ and do {
+        lock $input_comm;
         my $sr = window_buffer_size_record($r->{event});
         $input_comm->enqueue(
           Event{
@@ -2101,18 +2119,12 @@ sub input_event_producer { # $result ()
             Height  => $sr->{size}->{y},
           }
         );
-        q/*
-        local $Data::Dumper::Varname = 'window_buffer_size_event';
-        STDERR->print('input_comm: ', Dumper $sr);
-        */ if 0;
+        # Win32::OutputDebugString("input_comm: @{[%$sr]}");
         last;
       };
-      case: $_ == mouse_event and do {
+      case: mouse_event == $_ and do {
         my $mr = mouse_event_record($r->{event});
-        q/*
-        local $Data::Dumper::Varname = 'mouse_event';
-        STDERR->print('mouse_event_record: ', Dumper $mr);
-        */ if 0;
+        # Win32::OutputDebugString("input_comm: @{[%$mr]}");
         my $ev = Event{Type => EventMouse};
         switch: for ($mr->{event_flags}) {
           local $==$_; # use 'any { $===$_} (1..n)' instead of '$_ ~~ [1,2,..]'
@@ -2165,7 +2177,7 @@ sub input_event_producer { # $result ()
             $ev->{MouseY} = $last_y;
             last;
           };
-          case: $_ == 1 and do {
+          case: 1 == $_ and do {
             # mouse motion
             my ($x, $y) = ($mr->{mouse_pos}->{x}, $mr->{mouse_pos}->{y});
             if ($last_state != 0 && ($last_x != $x || $last_y != $y)) {
@@ -2179,7 +2191,7 @@ sub input_event_producer { # $result ()
             }
             last;
           };
-          case: $_ == 4 and do {
+          case: 4 == $_ and do {
             # mouse wheel
             my $n = $mr->{button_state} >> 16;
             if ($n > 0) {
@@ -2197,18 +2209,15 @@ sub input_event_producer { # $result ()
           }
         }
         if ($ev->{Type} != EventNone) {
+          lock $input_comm;
           $input_comm->enqueue({ %$ev });
-          q/*
-          require Data::Dumper
-          local $Data::Dumper::Varname = 'mouse_event';
-          STDERR->print('input_comm: ', Data::Dumper::Dumper($ev));
-          */ if 0;
+          # Win32::OutputDebugString("input_comm: @{[%$ev]}");
         }
         last;
       };
     }
   }
-  return !0;
+  return "0E0";
 }
 
 1;
@@ -2265,11 +2274,15 @@ Termbox for Win32.
 
 L<5.014|http://metacpan.org/release/DAPM/perl-5.14.4>
 
-L<Params::Util> 
+L<Params::Util>
 
-L<Win32::API> 
+L<Win32::API>
 
-L<Win32::Console> 
+L<Win32::Console>
+
+L<Unicode::EastAsianWidth>
+
+L<Unicode::EastAsianWidth::Detect>
 
 =head1 SEE ALSO
 

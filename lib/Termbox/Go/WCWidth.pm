@@ -24,7 +24,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.1.0_0');
+our $VERSION = version->declare('v0.1.1_0');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -34,13 +34,17 @@ our $AUTHORITY = 'github:brickpool';
 # ------------------------------------------------------------------------
 
 use Carp qw( croak );
-use List::Util qw( any );
+use Devel::StrictMode;
 use Params::Util qw(
   _STRING
   _NONNEGINT
 );
 use POSIX qw( :errno_h );
 
+use Termbox::Go::Devel qw(
+  __FUNCTION__ 
+  usage
+);
 use Termbox::Go::WCWidth::Tables;
 
 # ------------------------------------------------------------------------
@@ -78,7 +82,7 @@ our %EXPORT_TAGS = (
 # ------------------------------------------------------------------------
 
 # Auxiliary function for binary search in interval table
-sub bisearch { # $result ($ucs, \@table)
+sub _bisearch { # $result ($ucs, \@table)
   my ($ucs, $table) = @_;
   my $lower = 0;
   my $upper = scalar(@$table) - 1;
@@ -96,23 +100,35 @@ sub bisearch { # $result ($ucs, \@table)
   return 0;
 }
 
+my %cache = ();
 sub wcwidth { # $result ($ucs)
-  my $ucs = _NONNEGINT(shift) // croak(($! = EINVAL) .' "1/ucs"');
-  croak ''.($! = E2BIG) if @_;
+  my ($ucs) = @_;
+  croak(usage("$!", __FILE__, __FUNCTION__)) if STRICT and
+    $!  = @_ < 1                      ? EINVAL
+        : @_ > 1                      ? E2BIG
+        : !defined(_NONNEGINT($ucs))  ? EINVAL
+        : undef
+        ;
 
-  return 0 if (any { $ucs == $_ } (0, 0x034F, 0x2028, 0x2029)) ||
-    0x200B <= $ucs && $ucs <= 0x200F ||
-    0x202A <= $ucs && $ucs <= 0x202E ||
-    0x2060 <= $ucs && $ucs <= 0x2063;
-  return -1 if $ucs < 32 || 0x07f <= $ucs && $ucs < 0x0A0;
-  return 0 if bisearch($ucs, ZERO_WIDTH);
-  return 2 if bisearch($ucs, WIDE_EASTASIAN);
-  return 1;
+  return $cache{$ucs} if exists $cache{$ucs};
+  return 0 if $ucs == 0 || $ucs == 0x034f || $ucs == 0x2028 || $ucs == 0x2029
+    || 0x200b <= $ucs && $ucs <= 0x200f 
+    || 0x202a <= $ucs && $ucs <= 0x202e 
+    || 0x2060 <= $ucs && $ucs <= 0x2063;
+  return ($cache{$ucs} = -1) if $ucs < 32 || 0x07f <= $ucs && $ucs < 0x0a0;
+  return ($cache{$ucs} = 0) if _bisearch($ucs, ZERO_WIDTH);
+  return ($cache{$ucs} = 2) if _bisearch($ucs, WIDE_EASTASIAN);
+  return ($cache{$ucs} = 1);
 }
 
 sub wcswidth { # $result ($str)
-  my $str = _STRING(shift) // croak(($! = EINVAL) .' "1/str"');
-  croak ''.($! = E2BIG) if @_;
+  my ($str) = @_;
+  croak(usage("$!", __FILE__, __FUNCTION__)) if STRICT and
+    $!  = @_ < 1                  ? EINVAL
+        : @_ > 1                  ? E2BIG
+        : !defined(_STRING($str)) ? EINVAL
+        : undef
+        ;
 
   my $res = 0;
   for (split //, $str) {

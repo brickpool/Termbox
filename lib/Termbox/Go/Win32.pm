@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.1.0_0');
+our $VERSION = version->declare('v0.1.1_0');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -43,6 +43,7 @@ use Params::Util qw(
 );
 use POSIX qw( :errno_h );
 use threads;
+use threads::shared;
 use Thread::Queue;
 use Win32API::File;
 use Win32::Console;
@@ -53,6 +54,10 @@ use Termbox::Go::Common qw(
   !:mode
   !:color
   !:attr
+);
+use Termbox::Go::Devel qw(
+  __FUNCTION__
+  usage
 );
 use Termbox::Go::WCWidth qw( wcwidth );
 use Termbox::Go::Win32::Backend qw( :all );
@@ -151,7 +156,7 @@ our %EXPORT_TAGS = (
 sub Init { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   ($interrupt = create_event())
     or return ($! = ECHILD);
@@ -189,7 +194,7 @@ sub Init { # $errno ()
 
   $diffbuf = [];
 
-  threads->create(\&input_event_producer);
+  threads->create(\&input_event_producer)->detach();
   $IsInit = TRUE;
   return 0;
 }
@@ -199,7 +204,7 @@ sub Init { # $errno ()
 sub Close { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   # we ignore errors here, because we can't really do anything about them
   Clear(0, 0);
@@ -233,8 +238,9 @@ sub Close { # $errno ()
 sub Interrupt { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
+  lock $input_comm;
   $input_comm->insert(0, Event{Type => EventInterrupt});
   # $interrupt_comm->enqueue({});
   return 0;
@@ -244,14 +250,21 @@ sub Interrupt { # $errno ()
 sub Flush { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   update_size_maybe();
   prepare_diff_messages();
   foreach my $diff (@$diffbuf) {
     my $chars = '';
     foreach my $char (@{ $diff->{chars} }) {
-      my @utf16 = unpack('S*', Encode::encode('UTF16-LE', chr($char->{char})));
+      # my @utf16 = unpack('S*', Encode::encode('UTF16-LE', chr($char->{char})));
+      my @utf16 = ($char->{char});
+      if ($char->{char} > 0xffff) {
+        @utf16 = (
+          ($char->{char} - 0x10000) / 0x400 + 0xD800, 
+          ($char->{char} - 0x10000) % 0x400 + 0xDC00
+        );
+      }
       if (wcwidth($char->{char}) > 1) {
         $chars .= pack('S*', @utf16, $char->{attr} | common_lvb_leading_byte);
         $chars .= pack('S*', @utf16, $char->{attr} | common_lvb_trailing_byte);
@@ -278,7 +291,7 @@ sub SetCursor { # $errno ($x, $y)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($x, $y) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                ? EINVAL
+    $!  = @_ < 2                ? EINVAL
         : @_ > 2                ? E2BIG
         : !defined(_NUMBER($x)) ? EINVAL
         : !defined(_NUMBER($y)) ? EINVAL
@@ -304,7 +317,7 @@ sub SetCursor { # $errno ($x, $y)
 sub HideCursor { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   return SetCursor(cursor_hidden, cursor_hidden);
 }
@@ -315,11 +328,11 @@ sub SetCell { # $errno ($x, $y, $ch, $fg, $bg)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($x, $y, $ch, $fg, $bg) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 5                    ? EINVAL
+    $!  = @_ < 5                    ? EINVAL
         : @_ > 5                    ? E2BIG
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
-        : !length(_STRING($ch))     ? EINVAL
+        : !defined(_STRING($ch))    ? EINVAL
         : !defined(_NONNEGINT($fg)) ? EINVAL
         : !defined(_NONNEGINT($bg)) ? EINVAL
         : undef
@@ -332,7 +345,8 @@ sub SetCell { # $errno ($x, $y, $ch, $fg, $bg)
     return $! = (EINVAL, EOVERFLOW)[$y < 0];
   }
 
-  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x] = Cell($ch, $fg, $bg);
+  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x] 
+    = Cell(ord($ch), $fg, $bg);
   return 0;
 }
 
@@ -341,7 +355,7 @@ sub GetCell { # \%Cell ($x, $y)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($x, $y) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                    ? EINVAL
+    $!  = @_ < 2                    ? EINVAL
         : @_ > 2                    ? E2BIG
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
@@ -357,11 +371,11 @@ sub SetChar { # $errno ($x, $y, $ch)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($x, $y, $ch) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 3                    ? EINVAL
+    $!  = @_ < 3                    ? EINVAL
         : @_ > 3                    ? E2BIG
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
-        : !length(_STRING($ch))     ? EINVAL
+        : !defined(_STRING($ch))    ? EINVAL
         : undef
         ;
 
@@ -372,7 +386,7 @@ sub SetChar { # $errno ($x, $y, $ch)
     return $! = (EINVAL, EOVERFLOW)[$y < 0];
   }
 
-  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x]->{Ch} = $ch;
+  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x]->{Ch} = ord($ch);
   return 0;
 }
 
@@ -382,7 +396,7 @@ sub SetFg { # $errno ($x, $y, $fg)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($x, $y, $fg) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 3                    ? EINVAL
+    $!  = @_ < 3                    ? EINVAL
         : @_ > 3                    ? E2BIG
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
@@ -407,7 +421,7 @@ sub SetBg { # $errno ($x, $y, $bg)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($x, $y, $bg) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 3                    ? EINVAL
+    $!  = @_ < 3                    ? EINVAL
         : @_ > 3                    ? E2BIG
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
@@ -432,7 +446,7 @@ sub SetBg { # $errno ($x, $y, $bg)
 sub CellBuffer { # \@ ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   return $back_buffer->{cells};
 }
@@ -441,11 +455,11 @@ sub CellBuffer { # \@ ()
 sub PollEvent { # \%Event ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   select: {
-    lock $input_comm;
     my $ev;
+    lock $input_comm;
     case: ($ev = $input_comm->dequeue()) and 
       return { %$ev }; # must be a copy
     q/*
@@ -464,7 +478,7 @@ sub PollEvent { # \%Event ()
 sub Size { # $x, $y ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   return ($term_size->{x}, $term_size->{y});
 }
@@ -474,7 +488,7 @@ sub Clear { # $errno ($fg, $bg)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($fg, $bg) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                    ? EINVAL
+    $!  = @_ < 2                    ? EINVAL
         : @_ > 2                    ? E2BIG
         : !defined(_NONNEGINT($fg)) ? EINVAL
         : !defined(_NONNEGINT($bg)) ? EINVAL
@@ -504,13 +518,14 @@ sub SetInputMode { # $current ($mode)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($mode) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                      ? EINVAL
+    $!  = @_ < 1                      ? EINVAL
         : @_ > 1                      ? E2BIG
         : !defined(_NONNEGINT($mode)) ? EINVAL
         : undef
         ;
 
   if ($mode == InputCurrent) {
+    lock $input_mode;
     return $input_mode;
   }
   if ($mode & InputMouse) {
@@ -521,8 +536,8 @@ sub SetInputMode { # $current ($mode)
       or die $^E;
   }
 
-  $input_mode = $mode;
-  return $input_mode;
+  lock $input_mode;
+  return $input_mode = $mode;
 }
 
 # Sets the termbox output mode.
@@ -534,7 +549,7 @@ sub SetOutputMode { # $current ($mode)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($mode) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                      ? EINVAL
+    $!  = @_ < 1                      ? EINVAL
         : @_ > 1                      ? E2BIG
         : !defined(_NONNEGINT($mode)) ? EINVAL
         : undef
@@ -550,7 +565,7 @@ sub SetOutputMode { # $current ($mode)
 sub Sync { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
 
   return 0;
 }

@@ -624,7 +624,7 @@ A Windows system, perl v5.14 (or higher) and the Termbox::Go module.
 
   lavat -p3
 
-L<demo 6|https://github.com/AngelJumbo/demos/blob/main/lavat/6.gif?raw=true>
+=for html <img alt="demo 6" src="https://github.com/AngelJumbo/demos/blob/main/lavat/6.gif?raw=true" />
 
 PARTY MODE!!!
 
@@ -632,13 +632,13 @@ PARTY MODE!!!
 
   lavat -c red -R 1
 
-L<demo 1|https://github.com/AngelJumbo/demos/blob/main/lavat/1.gif?raw=true>
+=for html <img alt="demo 1" src="https://github.com/AngelJumbo/demos/blob/main/lavat/1.gif?raw=true" />
 
 =head2 More metaballs
 
   lavat -c cyan -R 4 -b 20 -r 2
 
-L<demo 2|(https://github.com/AngelJumbo/demos/blob/main/lavat/2.gif?raw=true>
+=for html <img alt="demo 2" src="https://github.com/AngelJumbo/demos/blob/main/lavat/2.gif?raw=true" />
 
 If you send more than one character to the -F option you can have 3d-ish 
 effect.
@@ -647,7 +647,7 @@ effect.
 
   lavat -c blue -R2 -F @@:::::: -r10
 
-L<demo 4|https://github.com/AngelJumbo/demos/blob/main/lavat/4.gif?raw=true>
+=for html <img alt="demo 4" src="https://github.com/AngelJumbo/demos/blob/main/lavat/4.gif?raw=true" />
 
 For the Alacritty and Kitty users I know that the -R option haven't been 
 working for you, but now you can set the color of the rim independently. 
@@ -657,7 +657,7 @@ Try: L</Set rim color>.
 
   lavat -c yellow -R1 -k red
 
-L<demo 5|https://github.com/AngelJumbo/demos/blob/main/lavat/5.gif?raw=true>
+=for html <img alt="demo 5" src="https://github.com/AngelJumbo/demos/blob/main/lavat/5.gif?raw=true" />
 
 B<Note>: The colors depend on your color scheme.
 

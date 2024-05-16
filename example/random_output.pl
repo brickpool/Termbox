@@ -44,10 +44,10 @@ sub main { # $ ()
 
   draw();
 loop:
-  for (my $ev;;) {
-    select: for ($event_queue->pending) {
-      case: $_ && ($ev = $event_queue->dequeue) and do {
-        $ev->{Key} //= 0;
+  for (;;) {
+    select: {
+      case: $event_queue->pending() and do {
+        my $ev = $event_queue->dequeue();
         if ($ev->{Type} == termbox::EventKey && $ev->{Key} == termbox::KeyEsc) {
           last loop
         }

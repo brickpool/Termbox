@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_');
-our $VERSION = version->declare('v0.1.0_0');
+our $VERSION = version->declare('v0.1.1_0');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -37,6 +37,7 @@ our $AUTHORITY = 'github:brickpool';
 require bytes; # not use, see https://perldoc.perl.org/bytes
 use Carp qw( croak );
 use Encode;
+use English qw( -no_match_vars );
 use List::Util qw(
   all
   any
@@ -53,18 +54,23 @@ use Params::Util qw(
 );
 use POSIX qw( :errno_h );
 use Scalar::Util qw( readonly );
+use threads;
+use Thread::Queue 3.02;
+
+use Termbox::Go::Devel qw(
+  __FUNCTION__
+  usage
+);
 use Termbox::Go::Common qw(
   :all 
   !:types
 );
-use threads;
-use Thread::Queue 3.02;
 
 my %module = (
   MSWin32 => 'Win32',
 );
  
-my $module = $module{$^O} || 'Win32';
+my $module = $module{$OSNAME} || 'Win32';
 my $termbox = "Termbox::Go::$module";
 require "Termbox/Go/$module.pm";
 
@@ -208,8 +214,6 @@ Nothing per default, but can export the following per request:
 
     :mode
       TB_MOD_ALT
-      TB_MOD_CTRL
-      TB_MOD_SHIFT
       TB_MOD_MOTION
 
     :input
@@ -406,8 +410,6 @@ our %EXPORT_TAGS = (
 
   mode => [qw(
     TB_MOD_ALT
-    TB_MOD_CTRL
-    TB_MOD_SHIFT
     TB_MOD_MOTION
   )],
 
@@ -597,17 +599,17 @@ use constant {
 
 # Event types (tb_event->{type})
 use constant {
-  TB_EVENT_KEY        => 1, # != EventKey
-  TB_EVENT_RESIZE     => 2, # != EventResize
-  TB_EVENT_MOUSE      => 3, # != EventMouse
+  TB_EVENT_KEY    => 1, # != EventKey
+  TB_EVENT_RESIZE => 2, # != EventResize
+  TB_EVENT_MOUSE  => 3, # != EventMouse
 };
 
 # Key modifiers (bitwise) (tb_event->{mod})
 use constant {
-  TB_MOD_ALT          => ModAlt,
-  TB_MOD_CTRL         => ModCtrl,
-  TB_MOD_SHIFT        => ModShift,
-  TB_MOD_MOTION       => ModMotion,
+  TB_MOD_ALT    => 1, # == ModAlt
+  # TB_MOD_CTRL   => ,
+  # TB_MOD_SHIFT  => ,
+  TB_MOD_MOTION => 8, # != ModMotion
 };
 
 # Input modes (bitwise) (tb_set_input_mode)
@@ -766,7 +768,7 @@ sub back::cells::FETCH { # $cell ($self, $index)
   my ($self, $index) = @_;
   return unless exists $self->{cells}->[$index];
   return tb_cell{
-    ch => ord($self->{cells}->[$index]->{Ch}),
+    ch => $self->{cells}->[$index]->{Ch},
     fg => $self->{cells}->[$index]->{Fg},
     bg => $self->{cells}->[$index]->{Bg},
   };
@@ -813,16 +815,10 @@ sub tb_event { # \% (|\%|@)
       && (all { defined _NONNEGINT($_) } values %{$_[0]})
       ;
   my $ev = {};
-  my $i = 0;
-  foreach (qw( type mod key ch w h x y )) {
-    last 
-      unless @_ > $i;
-    return
-      unless defined(_NONNEGINT($_[$i]));
-    $ev->{$_} = $_[$i];
-    $i++;
+  foreach my $k (qw( type mod key ch w h x y )) {
+    $ev->{$k} = _NONNEGINT(shift) // return;
   }
-  return $ev;
+  return @_ ? undef : $ev;
 }
 
 =for comment
@@ -874,7 +870,7 @@ BEGIN {
 
 # Initializes the termbox library. This function should be called before any
 # other functions. 
-sub tb_init { # $return ()
+sub tb_init { # $result ()
   return TB_ERR_INIT_ALREADY if $IsInit;
   my $rv;
   local $@;
@@ -898,7 +894,7 @@ sub tb_init { # $return ()
 
 # After successful initialization, the library must be finalized using the
 # tb_shutdown() function.
-sub tb_shutdown { # $return ()
+sub tb_shutdown { # $result ()
   return TB_ERR_NOT_INIT if not $IsInit;
   local $@;
   try: eval {
@@ -973,7 +969,7 @@ sub tb_height { # $columns ()
 }
 
 # Clears the internal back buffer using C<TB_DEFAULT> color.
-sub tb_clear { # $return ()
+sub tb_clear { # $result ()
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
   local $@;
@@ -995,7 +991,7 @@ sub tb_clear { # $return ()
 }
 
 # Synchronizes the internal back buffer with the terminal by writing to C<STDOUT>.
-sub tb_present { # $return ()
+sub tb_present { # $result ()
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
   local $@;
@@ -1019,7 +1015,7 @@ sub tb_present { # $return ()
 # Clears the internal front buffer effectively forcing a complete re-render of
 # the back buffer to the tty. It is not necessary to call this under normal
 # circumstances.
-sub tb_invalidate { # $return ()
+sub tb_invalidate { # $result ()
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
   local $@;
@@ -1042,7 +1038,7 @@ sub tb_invalidate { # $return ()
 }
 
 # Sets the position of the cursor. Upper-left character is (0, 0).
-sub tb_set_cursor { # $return ($cx, $cy)
+sub tb_set_cursor { # $result ($cx, $cy)
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
   local $@;
@@ -1064,7 +1060,7 @@ sub tb_set_cursor { # $return ($cx, $cy)
 }
 
 # The shortcut for L</tb_set_cursor(-1, -1)|tb_set_cursor>.
-sub tb_hide_cursor { # $return ()
+sub tb_hide_cursor { # $result ()
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
   local $@;
@@ -1086,10 +1082,10 @@ sub tb_hide_cursor { # $return ()
 }
 
 # Set cell contents in the internal back buffer at the specified position.
-sub tb_set_cell { # $return ($x, $y, $ch, $fg, $bg)
+sub tb_set_cell { # $result ($x, $y, $ch, $fg, $bg)
   my ($x, $y, $ch, $fg, $bg) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 5                    ? EINVAL
+    $!  = @_ < 5                    ? EINVAL
         : @_ > 5                    ? E2BIG
         : !defined(_NONNEGINT($ch)) ? EINVAL
         : undef
@@ -1135,7 +1131,7 @@ sub tb_set_cell { # $return ($x, $y, $ch, $fg, $bg)
 # If mode is TB_INPUT_CURRENT, the function returns the current input mode.
 #
 # The default input mode is TB_INPUT_ESC.
-sub tb_set_input_mode { # $return ($mode)
+sub tb_set_input_mode { # $result ($mode)
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
   local $@;
@@ -1231,7 +1227,7 @@ sub tb_set_input_mode { # $return ($mode)
 # support dynamically. If portability is desired, callers are recommended to
 # use TB_OUTPUT_NORMAL or make output mode end-user configurable. The same
 # advice applies to style attributes.
-sub tb_set_output_mode { # $return ($mode)
+sub tb_set_output_mode { # $result ($mode)
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
   local $@;
@@ -1258,10 +1254,10 @@ sub tb_set_output_mode { # $return ($mode)
 # interrupted, yielding a return code of TB_ERR_POLL. In this case, you may
 # check errno via C<$!>. If it's EINTR, you can safely ignore that
 # and call tb_peek_event() again.
-sub tb_peek_event { # $return ($event, $timeout_ms)
+sub tb_peek_event { # $result ($event, $timeout_ms)
   my ($tb_event, $timeout_ms) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                ? EINVAL
+    $!  = @_ < 2                ? EINVAL
         : @_ > 2                ? E2BIG
         : !tb_event($tb_event)  ? EINVAL
         : !_POSINT($timeout_ms) ? EINVAL
@@ -1296,27 +1292,25 @@ sub tb_peek_event { # $return ($event, $timeout_ms)
     # STDERR->say("@{[%$ev]}");
     case: EventKey == $_ and do {
       $tb_event->{type} = TB_EVENT_KEY;
-      $tb_event->{mod}  = !$ev->{Mod}              ? 0
-                        : $ev->{Mod} == ModAlt     ? TB_MOD_ALT
-                        : $ev->{Mod} == ModCtrl    ? TB_MOD_CTRL
-                        : $ev->{Mod} == ModShift   ? TB_MOD_SHIFT
-                        : $ev->{Mod} == ModMotion  ? TB_MOD_MOTION
-                        : 0;
-      $tb_event->{key}  = $ev->{Key} // 0;
-      $tb_event->{ch}   = ord($ev->{Ch} // "\0");
+      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
+      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
+      $tb_event->{key}  = $ev->{Key};
+      $tb_event->{ch}   = $ev->{Ch};
       return TB_OK;
     };
     case: EventResize == $_ and do {
       $tb_event->{type} = TB_EVENT_RESIZE;
-      $tb_event->{w}    = $ev->{Width} // 0;
-      $tb_event->{h}    = $ev->{Height} // 0;
+      $tb_event->{w}    = $ev->{Width};
+      $tb_event->{h}    = $ev->{Height};
       return TB_OK;
     };
     case: EventMouse == $_ and do {
       $tb_event->{type} = TB_EVENT_MOUSE;
-      $tb_event->{key}  = $ev->{Key} // 0;
-      $tb_event->{x}    = $ev->{MouseX} // 0;
-      $tb_event->{y}    = $ev->{MouseY} // 0;
+      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
+      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
+      $tb_event->{key}  = $ev->{Key};
+      $tb_event->{x}    = $ev->{MouseX};
+      $tb_event->{y}    = $ev->{MouseY};
       return TB_OK;
     };
     case: EventInterrupt == $_ and do {
@@ -1331,10 +1325,10 @@ sub tb_peek_event { # $return ($event, $timeout_ms)
 }
 
 # Same as tb_peek_event except no timeout.
-sub tb_poll_event { # $return ($event)
+sub tb_poll_event { # $result ($event)
   my ($tb_event) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                ? EINVAL
+    $!  = @_ < 1                ? EINVAL
         : @_ > 1                ? E2BIG
         : !tb_event($tb_event)  ? EINVAL
         : undef
@@ -1359,27 +1353,25 @@ sub tb_poll_event { # $return ($event)
     # STDERR->say("@{[%$ev]}");
     case: EventKey == $_ and do {
       $tb_event->{type} = TB_EVENT_KEY;
-      $tb_event->{mod}  = !$ev->{Mod}              ? 0
-                        : $ev->{Mod} == ModAlt     ? TB_MOD_ALT
-                        : $ev->{Mod} == ModCtrl    ? TB_MOD_CTRL
-                        : $ev->{Mod} == ModShift   ? TB_MOD_SHIFT
-                        : $ev->{Mod} == ModMotion  ? TB_MOD_MOTION
-                        : 0;
-      $tb_event->{key}  = $ev->{Key} // 0;
-      $tb_event->{ch}   = ord($ev->{Ch} // "\0");
+      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
+      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
+      $tb_event->{key}  = $ev->{Key};
+      $tb_event->{ch}   = $ev->{Ch};
       return TB_OK;
     };
     case: EventResize == $_ and do {
       $tb_event->{type} = TB_EVENT_RESIZE;
-      $tb_event->{w}    = $ev->{Width} // 0;
-      $tb_event->{h}    = $ev->{Height} // 0;
+      $tb_event->{w}    = $ev->{Width};
+      $tb_event->{h}    = $ev->{Height};
       return TB_OK;
     };
     case: EventMouse == $_ and do {
       $tb_event->{type} = TB_EVENT_MOUSE;
-      $tb_event->{key}  = $ev->{Key} // 0;
-      $tb_event->{x}    = $ev->{MouseX} // 0;
-      $tb_event->{y}    = $ev->{MouseY} // 0;
+      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
+      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
+      $tb_event->{key}  = $ev->{Key};
+      $tb_event->{x}    = $ev->{MouseX};
+      $tb_event->{y}    = $ev->{MouseY};
       return TB_OK;
     };
     case: EventInterrupt == $_ and do {
@@ -1394,12 +1386,12 @@ sub tb_poll_event { # $return ($event)
 }
 
 # Print function. For finer control, use L</tb_set_cell>.
-sub tb_print { # $return ($x, $y, $fg, $bg, $str)
+sub tb_print { # $result ($x, $y, $fg, $bg, $str)
   my ($x, $y, $fg, $bg, $str) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 5                  ? EINVAL
+    $!  = @_ < 5                  ? EINVAL
         : @_ > 5                  ? E2BIG
-        : !length(_STRING($str))  ? EINVAL
+        : !defined(_STRING($str)) ? EINVAL
         : undef
         ;
 
@@ -1427,11 +1419,11 @@ sub tb_print { # $return ($x, $y, $fg, $bg, $str)
 }
 
 # Printf function. For finer control, use L</tb_set_cell>.
-sub tb_printf { # $return ($x, $y, $fg, $bg, $fmt, @)
+sub tb_printf { # $result ($x, $y, $fg, $bg, $fmt, @)
   my ($x, $y, $fg, $bg, $fmt, @vl) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 5                    ? EINVAL
-        : !length(_STRING($fmt))    ? EINVAL
+    $!  = @_ < 5                    ? EINVAL
+        : !defined(_STRING($fmt))   ? EINVAL
         : !(all { defined $_ } @vl) ? EINVAL
         : undef
         ;
@@ -1464,9 +1456,9 @@ sub tb_printf { # $return ($x, $y, $fg, $bg, $fmt, @)
 sub tb_utf8_char_length { # $length ($c)
   my ($c) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                ? EINVAL
+    $!  = @_ < 1                ? EINVAL
         : @_ > 1                ? E2BIG
-        : !length(_STRING($c))  ? EINVAL
+        : !defined(_STRING($c)) ? EINVAL
         : undef
         ;
 
@@ -1484,11 +1476,11 @@ sub tb_utf8_char_length { # $length ($c)
 sub tb_utf8_char_to_unicode { # $length (\$out, $c)
   my ($out, $c) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                    ? EINVAL
+    $!  = @_ < 2                    ? EINVAL
         : @_ > 2                    ? E2BIG
         : !defined(_SCALAR0($out))  ? EINVAL
         : readonly($$out)           ? EINVAL
-        : !length(_STRING($c))      ? EINVAL
+        : !defined(_STRING($c))     ? EINVAL
         : undef
         ;
 
@@ -1511,11 +1503,11 @@ sub tb_utf8_char_to_unicode { # $length (\$out, $c)
 sub tb_utf8_unicode_to_char { # $length (\$out, $c)
   my ($out, $c) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 2                    ? EINVAL
+    $!  = @_ < 2                    ? EINVAL
         : @_ > 2                    ? E2BIG
         : !defined(_SCALAR0($out))  ? EINVAL
         : readonly($$out)           ? EINVAL
-        : !length(_STRING($c))      ? EINVAL
+        : !defined(_STRING($c))     ? EINVAL
         : undef
         ;
 
@@ -1526,7 +1518,7 @@ sub tb_utf8_unicode_to_char { # $length (\$out, $c)
 # Library utility function: returns the last error code
 sub tb_last_errno { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? EINVAL : undef;
+    $! = @_ ? E2BIG : 0;
 
   return $last_errno;
 }
@@ -1535,7 +1527,7 @@ sub tb_last_errno { # $errno ()
 sub tb_strerror { # $str ($err)
   my ($err) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! =  @_ < 1                  ? EINVAL
+    $!  = @_ < 1                  ? EINVAL
         : @_ > 1                  ? E2BIG
         : !defined(_NUMBER($err)) ? EINVAL
         : undef
@@ -1603,7 +1595,7 @@ sub tb_strerror { # $str ($err)
 # Library utility function: returns a slice into the termbox's back buffer
 sub tb_cell_buffer { # \@ ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : undef;
+    $! = @_ ? E2BIG : 0;
   tie my @cells, 'back::cells';
   return \@cells;
 }
@@ -1611,7 +1603,7 @@ sub tb_cell_buffer { # \@ ()
 # Library utility function: returns the stringified termbox's $version V-String
 sub tb_version { # $str ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? EINVAL : undef;
+    $! = @_ ? E2BIG : 0;
 
   return $version->stringify;
 }
@@ -1753,7 +1745,7 @@ Library utility function: returns a slice into the termbox's back buffer
 
 =head2 tb_clear
 
- my $return = tb_clear();
+ my  $result = tb_clear();
 
 Clears the internal back buffer using C<TB_DEFAULT> color.
 
@@ -1791,14 +1783,14 @@ called before L</tb_init> or after L</tb_shutdown>.
 
 =head2 tb_hide_cursor
 
- my $return = tb_hide_cursor();
+ my  $result = tb_hide_cursor();
 
 The shortcut for L</tb_set_cursor(-1, -1)|tb_set_cursor>.
 
 
 =head2 tb_init
 
- my $return = tb_init();
+ my  $result = tb_init();
 
 Initializes the termbox library. This function should be called before any
 other functions.
@@ -1806,7 +1798,7 @@ other functions.
 
 =head2 tb_invalidate
 
- my $return = tb_invalidate();
+ my  $result = tb_invalidate();
 
 Clears the internal front buffer effectively forcing a complete re-render of
 the back buffer to the tty. It is not necessary to call this under normal
@@ -1822,7 +1814,7 @@ Library utility function: returns the last error code
 
 =head2 tb_peek_event
 
- my $return = tb_peek_event($event, $timeout_ms);
+ my  $result = tb_peek_event($event, $timeout_ms);
 
 Wait for an event up to timeout_ms milliseconds and fill the event structure
 with it. If no event is available within the timeout period, TB_ERR_NO_EVENT
@@ -1834,46 +1826,46 @@ and call tb_peek_event() again.
 
 =head2 tb_poll_event
 
- my $return = tb_poll_event($event);
+ my  $result = tb_poll_event($event);
 
 =head2 tb_present
 
- my $return = tb_present();
+ my  $result = tb_present();
 
 Synchronizes the internal back buffer with the terminal by writing to C<STDOUT>.
 
 
 =head2 tb_print
 
- my $return = tb_print($x, $y, $fg, $bg, $str);
+ my  $result = tb_print($x, $y, $fg, $bg, $str);
 
 Print function. For finer control, use L</tb_set_cell>.
 
 
 =head2 tb_printf
 
- my $return = tb_printf($x, $y, $fg, $bg, $fmt, @array);
+ my  $result = tb_printf($x, $y, $fg, $bg, $fmt, @array);
 
 Printf function. For finer control, use L</tb_set_cell>.
 
 
 =head2 tb_set_cell
 
- my $return = tb_set_cell($x, $y, $ch, $fg, $bg);
+ my  $result = tb_set_cell($x, $y, $ch, $fg, $bg);
 
 Set cell contents in the internal back buffer at the specified position.
 
 
 =head2 tb_set_cursor
 
- my $return = tb_set_cursor($cx, $cy);
+ my  $result = tb_set_cursor($cx, $cy);
 
 Sets the position of the cursor. Upper-left character is (0, 0).
 
 
 =head2 tb_set_input_mode
 
- my $return = tb_set_input_mode($mode);
+ my  $result = tb_set_input_mode($mode);
 
 Sets the input mode. Termbox has two input modes:
 
@@ -1899,7 +1891,7 @@ The default input mode is TB_INPUT_ESC.
 
 =head2 tb_set_output_mode
 
- my $return = tb_set_output_mode($mode);
+ my  $result = tb_set_output_mode($mode);
 
 Sets the termbox output mode. Termbox has multiple output modes:
 
@@ -1980,7 +1972,7 @@ advice applies to style attributes.
 
 =head2 tb_shutdown
 
- my $return = tb_shutdown();
+ my  $result = tb_shutdown();
 
 After successful initialization, the library must be finalized using the
 tb_shutdown() function.
