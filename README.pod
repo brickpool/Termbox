@@ -1,0 +1,107 @@
+=head1 Termbox::Go
+
+B<Termbox::Go> is a Perl module that provides a minimalistic API and enables 
+Perl programmers to create text-based user interfaces.
+
+Here are three outstanding advantages:
+
+=over
+
+=item 1 B<Cross-platform compatibility> 
+
+The library is cross-platform, providing both terminal-based implementations 
+on I<*nix> operating systems and a WinAPI-based console implementation for 
+Windows operating systems.
+
+=item 2 B<Abstraction of functions> 
+
+The basic idea is to abstract the largest common subset of functions available 
+on all major terminals and other terminal-like APIs in a minimalistic way.
+
+=item 3 B<Simplicity of the API> 
+
+A small API means that it is easy to implement, test, maintain and learn. This 
+makes termbox a unique library.
+
+=back
+
+=head2 Warning
+
+This port of termbox-go is still quite new and still has to prove itself in 
+production use and possibly be improved.
+
+=head2 Install
+
+To install the B<Termbox::Go> module type the following:
+
+  cpan Termbox::Go
+
+Manual install:
+
+  perl Makefile.PL
+  make
+  make install
+
+=head2 Dependencies
+
+B<Termbox::Go> mainly needs Core modules of Perl >= 
+L<v5.14|http://metacpan.org/release/DAPM/perl-5.14.4>, but also 
+requires these modules:
+
+=over
+
+=item * L<Devel::StrictMode>
+
+=item * L<Params::Util> 
+
+=item * L<Import::Into>
+
+=item * L<Unicode::EastAsianWidth>
+
+=item * L<Unicode::EastAsianWidth::Detect>
+
+=back
+
+If the module is used under Windows, some standard Win32 libraries (which are 
+delivered with your Perl distribution) are required:
+
+=over
+
+=item * L<Win32::Console> 
+
+=item * L<Win32::API>
+
+=item * L<Win32API::File> 
+
+=back
+
+=head2 Examples
+
+For examples of what you can do, see the various examples in the C<example/> 
+directory. You can try them out via:
+  
+  perl example/hello_world.pl
+
+=head1 Credits
+
+B<Termbox::Go> is a port of L<termbox-go|https://github.com/nsf/termbox-go>.
+
+=head2 Author
+
+=over
+
+=item * 2024 J. Schneider E<lt>L<http://github.com/brickpool>E<gt>
+
+=back
+
+=head2 Copyright and Licence
+
+=over
+
+=item * Copyright (c) 2012 by termbox-go authors
+
+=item * MIT License
+
+=back
+
+=cut
