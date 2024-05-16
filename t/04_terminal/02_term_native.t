@@ -37,9 +37,9 @@ lives_ok { send_clear() or die $! } 'send_clear';
 lives_ok { update_size_maybe() or die $! } 'update_size_maybe';
 SKIP: {
   skip "not implemented on Windows OS", 2 if $^O eq 'MSWin32';
-  my $termios = syscall_Termios();
-  lives_ok { tcgetattr($outfd, $termios) or die $! } 'tcgetattr';
-  lives_ok { tcsetattr($outfd, $termios) or die $! } 'tcsetattr';
+  my $tios = syscall_Termios();
+  lives_ok { tcgetattr($outfd, $tios) or die $! } 'tcgetattr';
+  lives_ok { tcsetattr($outfd, $tios) or die $! } 'tcsetattr';
 }
 lives_ok { (parse_mouse_event(my $event = {}, $sequence))[1] or die }
   'parse_mouse_event';

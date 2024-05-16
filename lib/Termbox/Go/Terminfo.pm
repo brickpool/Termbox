@@ -47,7 +47,7 @@ use Termbox::Go::Common qw(
   $keys
   $funcs
 );
-use Termbox::Go::Devel qw( 
+use Termbox::Go::Devel qw(
   usage
   __FUNCTION__
 );
@@ -138,7 +138,7 @@ my $ti_keys = [
 # Functions --------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-sub load_terminfo { # $data|undef ()
+sub load_terminfo { # \$data|undef ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
@@ -192,7 +192,7 @@ sub load_terminfo { # $data|undef ()
   return ti_try_path("/usr/share/terminfo");
 }
 
-sub ti_try_path { # $data|undef ($path)
+sub ti_try_path { # \$data|undef ($path)
   my ($path) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $!  = @_ < 1                    ? EINVAL
@@ -314,7 +314,7 @@ sub setup_term { # $success ()
     return setup_term_builtin();
   }
 
-  open(my $rd, '<:raw', \$data);
+  open(my $rd, '<:raw', $data);
   # 0: magic number, 1: size of names section, 2: size of boolean section, 3:
   # size of numbers section (in integers), 4: size of the strings section (in
   # integers), 5: size of the string table
@@ -341,7 +341,7 @@ sub setup_term { # $success ()
   $table_offset = $str_offset + 2*$header[4];
 
   $keys = [];
-  for my $i (0 .. 0xffff - key_min) {
+  for my $i (0 .. 0xffff - key_min -1) {
     $keys->[$i] = ti_read_string($rd, $str_offset+2*$ti_keys->[$i], $table_offset);
     if ($!) {
       return;
@@ -350,7 +350,7 @@ sub setup_term { # $success ()
   $funcs = [];
   # the last two entries are reserved for mouse. because the table offset is
   # not there, the two entries have to fill in manually
-  for my $i (0 .. t_max_funcs - 2) {
+  for my $i (0 .. t_max_funcs - 2 -1) {
     $funcs->[$i] = ti_read_string($rd, $str_offset+2*$ti_funcs->[$i], $table_offset);
     if ($!) {
       return;
@@ -384,7 +384,7 @@ sub ti_read_string { # $string ($rd, $str_off, $table)
   if ($!) {
     return "";
   } else {
-    $off = unpack('v*', $buf);
+    ($off) = unpack('v', $buf);
   }
   seek($rd, $table + $off, 0);
   if ($!) {
@@ -397,7 +397,7 @@ sub ti_read_string { # $string ($rd, $str_off, $table)
       return "";
     }
     if ($b eq "\0") {
-      last
+      last;
     }
     $bs .= $b;
   }

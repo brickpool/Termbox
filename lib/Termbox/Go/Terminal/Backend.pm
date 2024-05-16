@@ -790,13 +790,11 @@ sub tcsetattr { # $succeded ($fd, \%termios)
   my $field = 0;
   foreach my $value (@{ $termios->{Cc} }) {
     $term->setcc($field, $value // 0);
-  } contine { $field++ }
+  } continue { $field++ }
 
   # setattr returns undef on failure
-  my $r = $term->setattr($fd, TCSANOW);
+  my $r = $term->setattr($fd, &POSIX::TCSANOW);
   if (!defined $r) {
-    $! = EBADF;
-    $@ = "SYS_IOCTL";
     return;
   }
   return "0E0";
@@ -834,7 +832,7 @@ sub tcgetattr { # $succeded ($fd, \%termios)
   foreach (@{ $termios->{Cc} }) {
     my $value = $term->getcc($field) // 0;
     $termios->{Cc}->[$field] = $value;
-  } contine { $field++ }
+  } continue { $field++ }
   return "0E0";
 }
 
