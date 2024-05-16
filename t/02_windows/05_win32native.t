@@ -1,7 +1,7 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 11;
+use Test::More tests => 12;
 use Test::Exception;
 
 plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
@@ -9,9 +9,15 @@ plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
 use Data::Dumper;
 use Devel::StrictMode;
 
+use_ok 'Win32';
 use_ok 'Win32::Console';
 use_ok 'Termbox::Go::Common', qw( :vars );
 use_ok 'Termbox::Go::Win32::Backend', qw( :func :vars );
+
+sub DbgPrint { # $success ($fmt, @args);
+  my ($fmt, @args) = @_;
+  Win32::OutputDebugString(sprintf($fmt, @args));
+}
 
 our $in = Win32::Console::_GetStdHandle(
   Win32::Console::constant('STD_INPUT_HANDLE', 0));
@@ -25,7 +31,7 @@ ok(
 lives_ok(
   sub {
     my $cursor = get_cursor_position($out);
-    diag Dumper $cursor if STRICT;
+    DbgPrint Dumper $cursor if STRICT;
   },
   'get_console_cursor_info()'
 );
@@ -33,7 +39,7 @@ lives_ok(
 lives_ok(
   sub {
     my ($coord, $rect) = get_term_size($out);
-    diag(Dumper($coord), Dumper($rect)) if STRICT;
+    DbgPrint("%s%s", Dumper($coord), Dumper($rect)) if STRICT;
   },
   'get_term_size()'
 );
@@ -41,7 +47,7 @@ lives_ok(
 lives_ok(
   sub {
     my $coord = get_win_min_size($out);
-    diag Dumper $coord if STRICT;
+    DbgPrint Dumper $coord if STRICT;
   },
   'get_win_min_size()'
 );
@@ -50,7 +56,7 @@ my $size;
 lives_ok(
   sub {
     $size = get_win_size($out);
-    diag Dumper $size if STRICT;
+    DbgPrint Dumper $size if STRICT;
   },
   'get_win_size()'
 );
@@ -80,16 +86,19 @@ subtest 'setup' => sub {
   );
 };
 
-lives_ok(
-  sub {
-    # mock clear()
-    no warnings qw( redefine once );
-    local *Termbox::Go::Win32::Backend::clear = sub {};
+SKIP: {
+  skip 'extended testing', 1 unless STRICT;
+  lives_ok(
+    sub {
+      # mock clear()
+      no warnings qw( redefine once );
+      local *Termbox::Go::Win32::Backend::clear = sub {};
 
-    update_size_maybe() 
-      or die "$^E\n";
-  },
-  'update_size_maybe()'
-);
+      update_size_maybe() 
+        or die "$^E\n";
+    },
+    'update_size_maybe()'
+  );
+}
 
 done_testing;

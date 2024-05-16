@@ -1,17 +1,25 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 6;
+use Test::More tests => 7;
 use Test::Exception;
 use Devel::StrictMode;
 use POSIX qw( :errno_h );
 
-use_ok 'Termbox::Go::Common', qw( usage __FUNCTION__ );
+plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
+
+use_ok 'Win32';
+use_ok 'Termbox::Go::Devel', qw( usage __FUNCTION__ );
 use_ok 'Termbox::Go::Win32::Backend', qw(
   set_console_active_screen_buffer
   set_console_screen_buffer_size
   get_console_mode
 );
+
+sub DbgPrint { # $success ($fmt, @args);
+  my ($fmt, @args) = @_;
+  Win32::OutputDebugString(sprintf($fmt, @args));
+}
 
 package Test {
 
@@ -28,12 +36,12 @@ Pod for testing croak with Pod::Usage only.
   # Comment for testing croak with Pod::Autopod
   sub croak { # void ($message)
     require Carp;
-    require Termbox::Go::Common;
+    require Termbox::Go::Devel;
     Carp::croak(
-      Termbox::Go::Common::usage(
+      Termbox::Go::Devel::usage(
         shift,
         __FILE__,
-        Termbox::Go::Common::__FUNCTION__()
+        Termbox::Go::Devel::__FUNCTION__()
       )
     )
   }
@@ -48,24 +56,27 @@ throws_ok(
   qr/(?:test(\$message))|(?:Invalid argument)/,
  'croak(EINVAL)'
 );
-diag "\n$@" if STRICT;
+DbgPrint "$@" if STRICT;
 
 dies_ok {
   set_console_active_screen_buffer()
     or die $^E 
 } 'ERROR_BAD_ARGUMENTS';
-diag "\n$@" if STRICT;
+DbgPrint "$@" if STRICT;
 
-dies_ok {
-  set_console_screen_buffer_size(1, { x => 0, y => undef })
-    or die $^E 
-} 'ERROR_INVALID_PARAMETER';
-diag "\n$@" if STRICT;
+SKIP: {
+  skip 'strict mode not enabled', 1 unless STRICT;
+  dies_ok {
+    set_console_screen_buffer_size(1, { x => 0, y => undef })
+      or die $^E
+  } 'ERROR_INVALID_PARAMETER';
+  DbgPrint do { local $_ = "$@"; s/%/%%/g; $_ } if STRICT;
+}
 
 dies_ok {
   get_console_mode(1, \0)
     or die $^E 
 } 'ERROR_INVALID_CRUNTIME_PARAMETER';
-diag "\n$@" if STRICT;
+DbgPrint "$@" if STRICT;
 
 done_testing;

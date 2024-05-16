@@ -8,11 +8,25 @@ plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
 
 use Data::Dumper;
 use Devel::StrictMode;
+BEGIN {
+  require List::Util;
+  if (exists &List::Util::pairvalues) {
+    List::Util->import(qw( pairvalues ));
+  } else {
+    # pairvalues is not available, so we have to use our own variant
+    *pairvalues = sub { return @_[ grep { $_ % 2 } 1..0+@_ ] };
+  }
+}
 
-use_ok 'List::Util', qw( pairvalues );
+use_ok 'Win32';
 use_ok 'Win32::Console';
 use_ok 'Termbox::Go::Common', qw( $in $out );
 use_ok 'Termbox::Go::Win32::Backend', qw( :syscalls );
+
+sub DbgPrint { # $success ($fmt, @args);
+  my ($fmt, @args) = @_;
+  Win32::OutputDebugString(sprintf($fmt, @args));
+}
 
 our $in = Win32::Console::_GetStdHandle(
   Win32::Console::constant('STD_INPUT_HANDLE', 0));
@@ -36,7 +50,7 @@ lives_ok(
   sub {
     get_console_screen_buffer_info($out, my $info = {})
       or die "$^E\n";
-    diag Dumper $info if STRICT;
+    DbgPrint Dumper $info if STRICT;
     $window = {
       top => 0,
       bottom => $info->{window}->{bottom} - $info->{window}->{top},
@@ -59,7 +73,7 @@ lives_ok(
   sub {
     get_console_cursor_info($out, my $info = {})
       or die "$^E\n";
-    diag Dumper $info if STRICT;
+    DbgPrint Dumper $info if STRICT;
   },
   'get_console_cursor_info()'
 );
@@ -87,7 +101,7 @@ lives_ok(
       or die "$^E\n";
     read_console_input($in, my $record = {})
       or die "$^E\n";
-    diag Dumper $record if STRICT;
+    DbgPrint Dumper $record if STRICT;
   },
   'read_console_input()'
 );
@@ -97,7 +111,7 @@ lives_ok(
   sub {
     my $handle = get_console_mode($in, \$mode)
       or die "$^E\n";
-    diag $mode if STRICT;
+    DbgPrint $mode if STRICT;
   },
   'get_console_mode()'
 );
@@ -130,7 +144,7 @@ lives_ok(
   sub {
     my $handle = get_current_console_font($out, my $info = {})
       or die "$^E\n";
-    diag Dumper $info if STRICT;
+    DbgPrint Dumper $info if STRICT;
   },
   'get_current_console_font()'
 );

@@ -65,7 +65,7 @@ subtest 'cellbuf->clear()' => sub {
   is_deeply(
     $buf->{cells},
     [ 
-      map { { Ch => ' ', Fg => 0, Bg => 0 } } 
+      map { { Ch => ord(' '), Fg => 0, Bg => 0 } } 
         1..$buf->{width}*$buf->{height} 
     ],
     'empty'
@@ -92,12 +92,12 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ' ', Fg => 1, Bg => 0 },
-      { Ch => ' ', Fg => 2, Bg => 0 },
-      { Ch => ' ', Fg => 4, Bg => 0 },
-      { Ch => ' ', Fg => 5, Bg => 0 },
-      { Ch => ' ', Fg => 7, Bg => 0 },
-      { Ch => ' ', Fg => 8, Bg => 0 },
+      { Ch => ord(' '), Fg => 1, Bg => 0 },
+      { Ch => ord(' '), Fg => 2, Bg => 0 },
+      { Ch => ord(' '), Fg => 4, Bg => 0 },
+      { Ch => ord(' '), Fg => 5, Bg => 0 },
+      { Ch => ord(' '), Fg => 7, Bg => 0 },
+      { Ch => ord(' '), Fg => 8, Bg => 0 },
     ],
     'equal'
   );
@@ -117,10 +117,10 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ' ', Fg => 1, Bg => 0 },
-      { Ch => ' ', Fg => 4, Bg => 0 },
-      { Ch => ' ', Fg => 7, Bg => 0 },
-      { Ch => ' ', Fg => 0, Bg => 0 },
+      { Ch => ord(' '), Fg => 1, Bg => 0 },
+      { Ch => ord(' '), Fg => 4, Bg => 0 },
+      { Ch => ord(' '), Fg => 7, Bg => 0 },
+      { Ch => ord(' '), Fg => 0, Bg => 0 },
     ],
     'equal'
   );
@@ -140,10 +140,10 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ' ', Fg => 1, Bg => 0 },
-      { Ch => ' ', Fg => 0, Bg => 0 },
-      { Ch => ' ', Fg => 4, Bg => 0 },
-      { Ch => ' ', Fg => 0, Bg => 0 },
+      { Ch => ord(' '), Fg => 1, Bg => 0 },
+      { Ch => ord(' '), Fg => 0, Bg => 0 },
+      { Ch => ord(' '), Fg => 4, Bg => 0 },
+      { Ch => ord(' '), Fg => 0, Bg => 0 },
     ],
     'equal'
   );
@@ -165,12 +165,12 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ' ', Fg => 1, Bg => 0 },
-      { Ch => ' ', Fg => 2, Bg => 0 },
-      { Ch => ' ', Fg => 0, Bg => 0 },
-      { Ch => ' ', Fg => 3, Bg => 0 },
-      { Ch => ' ', Fg => 4, Bg => 0 },
-      { Ch => ' ', Fg => 0, Bg => 0 },
+      { Ch => ord(' '), Fg => 1, Bg => 0 },
+      { Ch => ord(' '), Fg => 2, Bg => 0 },
+      { Ch => ord(' '), Fg => 0, Bg => 0 },
+      { Ch => ord(' '), Fg => 3, Bg => 0 },
+      { Ch => ord(' '), Fg => 4, Bg => 0 },
+      { Ch => ord(' '), Fg => 0, Bg => 0 },
     ],
     'equal'
   );

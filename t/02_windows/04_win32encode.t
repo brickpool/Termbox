@@ -1,15 +1,16 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 6;
+use Test::More tests => 7;
 plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
 
 use Devel::Peek;
 use Devel::StrictMode;
-use Win32::Console;
 use Encode;
 
-my $out = Win32::Console->new(STD_ERROR_HANDLE);
+use_ok 'Win32::Console';
+
+my $out = Win32::Console->new(STD_ERROR_HANDLE());
 isa_ok $out, 'Win32::Console';
 ok Win32::Console::OutputCP(65001), 'is CP65001';
 
@@ -21,8 +22,8 @@ $char = "\x{261D}";
 is length($char), 1, 'length == 1';
 ok Encode::is_utf8($char), 'is utf8';
 if (STRICT) {
-  STDERR->print('# write: ');
-  Dump $char ;
+  diag 'write: ';
+  Dump $char;
 }
 
 my ($x, $y) = $out->Cursor();
