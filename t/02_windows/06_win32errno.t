@@ -1,12 +1,17 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 7;
+use Test::More;
 use Test::Exception;
 use Devel::StrictMode;
 use POSIX qw( :errno_h );
 
-plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
+if ($^O ne 'MSWin32') {
+  plan skip_all => 'Windows OS required for testing';
+}
+else {
+  plan tests => 7;
+}
 
 use_ok 'Win32';
 use_ok 'Termbox::Go::Devel', qw( usage __FUNCTION__ );

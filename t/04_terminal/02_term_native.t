@@ -3,6 +3,7 @@ use warnings;
 
 use Test::More tests => 18;
 use Test::Exception;
+use POSIX qw( :fcntl_h );
 
 use_ok 'Termbox::Go::Common', qw(
   :keys
@@ -18,12 +19,25 @@ use_ok 'Termbox::Go::Terminal::Backend', qw(
   :vars
 );
 
-our $out = \*STDERR;
+our $out;
+if ($^O eq 'MSWin32') {
+  $out = \*STDERR;
+} else {
+  sysopen($out, "/dev/tty", O_WRONLY, 0);
+}
 our $outfd = fileno($out);
 our $back_buffer; $back_buffer->init(1,1);
 our $front_buffer; $front_buffer->init(1,1);
 my $sequence = "\x1b[MC\x95(";
 our $inbuf = 'abc';
+BEGIN {
+  if ($^O eq 'MSWin32') {
+    # Term::ReadKey::GetTerminalSize did not work if the handle was
+    # redirected or duplicated
+    $ENV{COLUMNS} ||= 80;
+    $ENV{LINES} ||= 24;
+  }
+}
 
 lives_ok { write_cursor(0, 0) } 'write_cursor';
 lives_ok { write_sgr_fg(ColorYellow()) } 'write_sgr_fg';
@@ -36,7 +50,7 @@ lives_ok { flush() or die $! } 'flush';
 lives_ok { send_clear() or die $! } 'send_clear';
 lives_ok { update_size_maybe() or die $! } 'update_size_maybe';
 SKIP: {
-  skip "not implemented on Windows OS", 2 if $^O eq 'MSWin32';
+  skip "not supported on Windows OS", 2 if $^O eq 'MSWin32';
   my $tios = syscall_Termios();
   lives_ok { tcgetattr($outfd, $tios) or die $! } 'tcgetattr';
   lives_ok { tcsetattr($outfd, $tios) or die $! } 'tcsetattr';

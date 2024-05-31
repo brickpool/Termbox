@@ -616,7 +616,7 @@ resolution of the lava.)
 
 =head1 REQUIREMENTS
 
-A Windows system, perl v5.14 (or higher) and the Termbox::Go module.
+A text based terminal system, perl v5.14 (or higher) and the Termbox::Go module.
 
 =head1 DEMO
 

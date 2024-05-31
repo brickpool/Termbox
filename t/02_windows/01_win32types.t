@@ -1,9 +1,16 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 7;
+use Test::More;
 use Test::Exception;
 use Devel::StrictMode;
+
+if ($^O ne 'MSWin32') {
+  plan skip_all => 'Windows OS required for testing';
+}
+else {
+  plan tests => 7;
+}
 
 use_ok 'Termbox::Go::Win32::Backend', qw( :types );
 

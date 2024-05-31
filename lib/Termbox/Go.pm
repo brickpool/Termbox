@@ -18,7 +18,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.1.1_0');
+our $VERSION = version->declare('v0.2.0_0');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -32,15 +32,23 @@ use English qw( -no_match_vars );
 use Import::into;
 
 my %module = (
-  MSWin32 => 'Win32',
+  darwin          => 'Terminal',
+  dragonfly       => 'Terminal',
+  freebsd         => 'Terminal',
+  linux           => 'Terminal',
+  netbsd          => 'Terminal',
+  openbsd         => 'Terminal',
+  MSWin32         => 'Win32',
 );
- 
-my $module = $module{$OSNAME} || 'Win32';
+# https://stackoverflow.com/a/72575526
+# $module{MSWin32} = 'WinVT' if $ENV{WT_SESSION};
+
+my $module = $module{$OSNAME} || 'Terminal';
  
 require Termbox::Go::Legacy;
 require Termbox::Go::Common;
 require "Termbox/Go/$module.pm";
-require Termbox::Go::Win32::Backend if $module eq 'Win32';
+our @ISA = ("Termbox::Go::$module");
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
@@ -162,8 +170,8 @@ Termbox::Go - Pure Perl termbox implementation
 
 =head1 DESCRIPTION
 
-This document describes the Termbox library for Perl, for the use of Windows 
-console applications.
+This document describes the Termbox library for Perl, for the use of terminal 
+applications.
 
 The advantage of the Termbox library is the use of an standard. Termbox
 contains a few functions with which console applications can be 

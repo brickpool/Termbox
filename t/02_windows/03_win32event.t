@@ -1,10 +1,15 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 6;
+use Test::More;
 use Test::Exception;
 
-plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
+if ($^O ne 'MSWin32') {
+  plan skip_all => 'Windows OS required for testing';
+}
+else {
+  plan tests => 6;
+}
 
 use_ok 'Win32API::File';
 use_ok 'Termbox::Go::Win32::Backend', qw(

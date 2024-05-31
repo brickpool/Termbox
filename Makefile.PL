@@ -21,7 +21,7 @@ WriteMakefile1(
     'List::Util'                      => 1.29,      # v5.14 => 1.23
     'Params::Util'                    => 1.07,
     'Import::Into'                    => 1.002005,
-    'Thread::Queue'                   => 3.02,      # v5.14 => 2.12 
+    'Thread::Queue'                   => 3.07,      # v5.14 => 2.12
     'Unicode::EastAsianWidth'         => 0,
     'Unicode::EastAsianWidth::Detect' => 0,
   },
@@ -58,12 +58,14 @@ WriteMakefile1(
           'Data::Dumper'    => 0,
           'IO::File'        => 0,
           'lib'             => 0,
+          'open'            => 0,
           'Pod::Usage'      => 0,
           'POSIX'           => 0,
           'Scalar::Util'    => 0,
           'strict'          => 0,
           'threads'         => 0,
           'threads::shared' => 0,
+          'Time::HiRes'     => 0,
           'version'         => 0,
           'warnings'        => 0,
         },
@@ -72,7 +74,6 @@ WriteMakefile1(
           'Find::Bin'     => 0,
           'LWP'           => 0,
           'Pod::Autopod'  => 0,
-          'Time::HiRes'   => 0,
         },
       },
       test => {
