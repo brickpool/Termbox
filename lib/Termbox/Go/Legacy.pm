@@ -1275,8 +1275,7 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
   my $ev;
   local $@;
   try: eval {
-    no warnings;                  # supress '... "DEFAULT" not defined'
-    local $SIG{ALRM} = 'DEFAULT'; # supress '...no signal handler set.'
+    local $SIG{ALRM} = sub { "alarm\n" }; # supress '...no signal handler set.'
     my $alarm = threads->create(
       sub {
         local $SIG{ALRM} = sub { threads->exit };
