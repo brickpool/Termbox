@@ -253,7 +253,8 @@ sub Init { # $errno ()
   $back_buffer->init($termw, $termh);
   $front_buffer->init($termw, $termh);
   $back_buffer->clear();
-  $front_buffer->clear();
+  # Do not clear the front buffer to avoid artifacts.
+  # $front_buffer->clear();
 
   threads->create(sub {
     use bytes;
