@@ -24,7 +24,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.1.1_0');
+our $VERSION = version->declare('v0.2.0_0');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -143,6 +143,8 @@ sub wcswidth { # $result ($str)
 
 __END__
 
+=encoding utf-8
+
 =head1 NAME
 
 Termbox::Go::WCWidth - determine columns needed for a wide character
@@ -172,6 +174,8 @@ Takes a single I<codepoint> and outputs its width:
 
 Returns:
 
+=over
+
 =item C<-1> for a control character
 
 =item C<0> for a character that does not advance the cursor (NULL or combining)
@@ -179,6 +183,8 @@ Returns:
 =item C<1> for most characters
 
 =item C<2> for full width characters
+
+=back
 
 =head2 C<wcswidth>
 

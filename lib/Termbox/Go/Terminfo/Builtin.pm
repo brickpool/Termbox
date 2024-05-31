@@ -33,15 +33,9 @@ our $AUTHORITY = 'github:brickpool';
 # Imports ----------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-BEGIN {
-  require List::Util;
-  if (exists &List::Util::pairvalues) {
-    List::Util->import(qw( pairvalues ));
-  } else {
-    # pairvalues is not available, so we have to use our own variant
-    *pairvalues = sub { return @_[ grep { $_ % 2 } 1..0+@_ ] };
-  }
-}
+use List::Util 1.29 qw(
+  pairvalues
+);
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------

@@ -26,7 +26,7 @@ lives_ok  { tb_set_cursor(0,0)            == 0 or die } 'tb_set_cursor()';
 lives_ok  { tb_set_cell(0,0,ord('@'),0,0) == 0 or die } 'tb_set_cell()';
 lives_ok  { tb_set_input_mode(0)          >= 0 or die } 'tb_set_input_mode()';
 lives_ok  { tb_set_output_mode(0)         >= 0 or die } 'tb_set_output_mode()';
-lives_ok  { tb_peek_event(tb_event(), 200)       } 'tb_peek_event()';
+lives_ok  { tb_peek_event(tb_event(),200);  die if $@ } 'tb_peek_event()';
 lives_ok  { tb_printf(0,0,0,0,'%d',0)     == 0 or die } 'tb_printf()';
 lives_ok  { @{ tb_cell_buffer() }          > 0 or die } 'tb_cell_buffer()';
 lives_ok  { tb_clear()                    == 0 or die } 'tb_clear()';

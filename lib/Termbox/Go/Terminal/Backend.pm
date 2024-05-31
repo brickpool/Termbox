@@ -35,9 +35,10 @@ our $AUTHORITY = 'github:brickpool';
 
 require bytes; # not use, see https://perldoc.perl.org/bytes
 use Carp qw( croak );
+use Encode;
 use English qw( -no_match_vars );
 use IO::File;
-use List::Util qw( 
+use List::Util 1.29 qw( 
   any
   all
 );
@@ -58,7 +59,7 @@ use POSIX qw(
 );
 use threads;
 use threads::shared;
-use Thread::Queue;
+use Thread::Queue 3.07;
 
 use Termbox::Go::Common qw( :all );
 use Termbox::Go::Devel qw(
@@ -363,7 +364,7 @@ our $lastfg           = attr_invalid;
 our $lastbg           = attr_invalid;
 our $lastx            = coord_invalid;
 our $lasty            = coord_invalid;
-our $inbuf            = '';
+our $inbuf    :shared = '';
 our $outbuf;            open($outbuf, "+>", \my $outstr);
 our $sigwinch :shared = $_ = Thread::Queue->new(); $_->limit(1);
 our $sigio    :shared = $_ = Thread::Queue->new(); $_->limit(1);
@@ -379,6 +380,7 @@ our $grayscale = [
 # Functions --------------------------------------------------------------
 # ------------------------------------------------------------------------
 
+#
 sub write_cursor { # void ($x, $y)
   my ($x, $y) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
@@ -557,24 +559,15 @@ sub get_term_size { # $cols, $rows ($fd)
         ;
 
   my ($col, $row);
-  if ($OSNAME eq 'MSWin32') {
-    if ( eval { require Win32::Console; require Win32API::File }) {
-      my $h = Win32API::File::FdGetOsFHandle($fd);
-      if ($^E+0 != 0) {
-        ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($h);
-      }
-    }
-  } else {
-    my $fh = IO::File->new_from_fd($fd, 'w') 
-      or return;
-    local $@;
-    if (eval { require Term::ReadKey }) {
-      # This is more portable than the raw ioctl
-      ($col, $row) = Term::ReadKey::GetTerminalSize($fh);
-    } elsif (exists &TIOCGWINSZ) {
-      ioctl($fh, &TIOCGWINSZ, my $sz = '');
-      ($col, $row) = unpack('S2', $sz);
-    }
+  my $fh = IO::File->new_from_fd($fd, 'w')
+    or return;
+  local $@;
+  if (eval { require Term::ReadKey }) {
+    # This is more portable than the raw ioctl
+    ($col, $row) = Term::ReadKey::GetTerminalSize($fh);
+  } elsif (exists &TIOCGWINSZ) {
+    ioctl($fh, &TIOCGWINSZ, my $sz = '');
+    ($col, $row) = unpack('S2', $sz);
   }
   if (!$col || !$row) {
     $! = ENOTTY;
@@ -594,7 +587,7 @@ sub send_attr { # void ($fg, $bg)
         ;
 
   if ($fg == $lastfg && $bg == $lastbg) {
-    return
+    return;
   }
 
   $outbuf->print($funcs->[t_sgr0]);
@@ -605,7 +598,7 @@ sub send_attr { # void ($fg, $bg)
     case: $_ == Output256 and do {
       $fgcol = $fg & 0x1ff;
       $bgcol = $bg & 0x1ff;
-      last
+      last;
     };
     case: $_ == Output216 and do {
       $fgcol = $fg & 0xff;
@@ -622,7 +615,7 @@ sub send_attr { # void ($fg, $bg)
       if ($bgcol != ColorDefault) {
         $bgcol += 0x10;
       }
-      last
+      last;
     };
     case: $_ == OutputGrayscale and do {
       $fgcol = $fg & 0x1f;
@@ -639,12 +632,12 @@ sub send_attr { # void ($fg, $bg)
       if ($bgcol != ColorDefault) {
         $bgcol = $grayscale->[$bgcol];
       }
-      last
+      last;
     };
     case: $_ == OutputRGB and do {
       $fgcol = $fg;
       $bgcol = $bg;
-      last
+      last;
     };
     default: {
       $fgcol = $fg & 0xff;
@@ -706,7 +699,7 @@ sub send_char { # void ($x, $y, $ch)
     write_cursor($x, $y);
   }
   ($lastx, $lasty) = ($x, $y);
-  $outbuf->print($ch);
+  $outbuf->print(Encode::encode_utf8($ch));
   return;
 }
 
@@ -714,10 +707,10 @@ sub flush { # $succeded ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  $out->print($outstr);
+  syswrite($out, $outstr);
   my $err = $!+0;
   $outbuf->seek(0, 0);
-  $err ||= $!+0;
+  $err = $!+0 if $err == 0;
   $outstr = '';
 
   return $err ? undef : "0E0";
@@ -1028,20 +1021,25 @@ sub extract_raw_event { # $succeded (\$data, \%event)
 }
 
 sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
-  my ($buf, $event, $allow_esc_wait) = @_;
+  my ($inbuf_ref, $event, $allow_esc_wait) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 3                    ? EINVAL
-        : @_ > 3                    ? E2BIG
-        : !defined(_SCALAR0($buf))  ? EINVAL
-        : !defined(_HASH0($event))  ? EINVAL
-        : ref($allow_esc_wait)      ? EINVAL
+    $!  = @_ < 3                          ? EINVAL
+        : @_ > 3                          ? E2BIG
+        : !defined(_SCALAR0($inbuf_ref))  ? EINVAL
+        : !defined(_HASH0($event))        ? EINVAL
+        : ref($allow_esc_wait)            ? EINVAL
         : 0;
         ;
 
-  my $ch0 = substr($$buf, 0, 1);
-  if ($ch0 eq "\033") {
+  if (!length($$inbuf_ref)) {
+    $event->{N} = 0;
+    return event_not_extracted;
+  }
+
+  my $inbuf0 = substr($$inbuf_ref, 0, 1);
+  if ($inbuf0 eq "\033") {
     # possible escape sequence
-    my ($n, $ok) = parse_escape_sequence($event, $buf);
+    my ($n, $ok) = parse_escape_sequence($event, $inbuf_ref);
     if ($n != 0) {
       $event->{N} = $n;
       if ($ok) {
@@ -1070,9 +1068,9 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
       case ($input_mode & InputAlt) and do {
         # if we're in alt mode, set Alt modifier to event and redo parsing
         $event->{Mod} = ModAlt;
-        $$buf =~ s/^\033//;
-        my $status = extract_event($buf, $event, FALSE);
-        $$buf =~ s/^/\033/;
+        $$inbuf_ref =~ s/^\033//;
+        my $status = extract_event($inbuf_ref, $event, FALSE);
+        $$inbuf_ref =~ s/^/\033/;
         if ($status == event_extracted) {
           $event->{N}++;
         } else {
@@ -1090,17 +1088,17 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
   # so, it's a FUNCTIONAL KEY or a UNICODE character
 
   # first of all check if it's a functional key
-  if (ord($ch0) <= KeySpace || ord($ch0) == KeyBackspace2) {
+  if (ord($inbuf0) <= KeySpace || ord($inbuf0) == KeyBackspace2) {
     # fill event, pop buffer, return success
     $event->{Ch} = 0;
-    $event->{Key} = ord($ch0);
+    $event->{Key} = ord($inbuf0);
     $event->{N} = 1;
     return event_extracted;
   }
 
   # the only possible option is utf8
-  if (my $n = utf8::upgrade($ch0)) {
-    $event->{Ch} = ord($ch0);
+  if (my $n = utf8::upgrade($inbuf0)) {
+    $event->{Ch} = ord($inbuf0);
     $event->{Key} = 0;
     $event->{N} = $n;
     return event_extracted;
@@ -1180,3 +1178,140 @@ L<Params::Util>
 L<termbox.go|https://raw.githubusercontent.com/nsf/termbox-go/master/termbox.go>
 
 =cut
+
+
+#################### pod generated by Pod::Autopod - keep this line to make pod updates possible ####################
+
+=head1 SUBROUTINES
+
+=head2 enable_wait_for_escape_sequence
+
+ my $scalar = enable_wait_for_escape_sequence();
+
+On macOS, enable behavior which will wait before deciding that the escape
+key was pressed, to account for partially send escape sequences, especially
+with regard to lengthy mouse sequences.
+See L<https://github.com/nsf/termbox-go/issues/132>
+
+
+=head2 escapeRGB
+
+ my $string = escapeRGB($fg, $r, $g, $b);
+
+=head2 extract_event
+
+ my $extract_event_res = extract_event(\$inbuf, \%event, $allow_esc_wait);
+
+=head2 extract_raw_event
+
+ my $succeded = extract_raw_event(\$data, \%event);
+
+=head2 flush
+
+ my $succeded = flush();
+
+=head2 get_term_size
+
+ my ($cols, $rows) = get_term_size($fd);
+
+=head2 input_event
+
+ my \%hashref | undef = input_event( | @array | \%hashref);
+
+Usage:
+ my \%hashref = input_event();
+ my \%hashref = input_event($bytes, $err) // die;
+ my \%hashref = input_event({
+   data => $bytes,
+   err  => $errno,
+ }) // die;
+
+
+=head2 parse_escape_sequence
+
+ my ($count, $succeded) = parse_escape_sequence(\%event, \$buf);
+
+=head2 parse_mouse_event
+
+ my ($count, $succeded) = parse_mouse_event(\%event, $buf);
+
+=head2 send_attr
+
+ send_attr($fg, $bg);
+
+=head2 send_char
+
+ send_char($x, $y, $ch);
+
+=head2 send_clear
+
+ my $succeded = send_clear();
+
+=head2 syscall_Termios
+
+ my \%hashref | undef = syscall_Termios( | @array | \%hashref);
+
+Usage:
+ my \%hashref = syscall_Termios();
+ my \%hashref = syscall_Termios(
+   $c_iflag, $c_oflag, $c_cflag, $c_lflag,
+   \@c_cc,
+   $ispeed, $ospeed,
+ ) // die;
+ my \%hashref = syscall_Termios({
+    Iflag     => $c_iflag,
+    Oflag     => $c_oflag,
+    Cflag     => $c_cflag,
+    Lflag     => $c_lflag,
+    Cc        => \@c_cc,
+    Ispeed    => $ispeed,
+    Ospeed    => $ospeed,
+ }) // die;
+
+
+=head2 tcgetattr
+
+ my $succeded = tcgetattr($fd, \%termios);
+
+=head2 tcsetattr
+
+ my $succeded = tcsetattr($fd, \%termios);
+
+=head2 update_size_maybe
+
+ my $succeded = update_size_maybe();
+
+=head2 winsize
+
+ my \%hashref | undef = winsize( | @array | \%hashref);
+
+Usage:
+ my \%hashref = winsize();
+ my \%hashref = winsize($rows, $cols, $xpixels, $ypixels) // die;
+ my \%hashref = winsize({
+    rows    => $rows,
+    cols    => $cols,
+    xpixels => $xpixels,
+    ypixels => $ypixels,
+ }) // die;
+
+
+=head2 write_cursor
+
+ write_cursor($x, $y);
+
+=head2 write_sgr
+
+ write_sgr($fg, $bg);
+
+=head2 write_sgr_bg
+
+ write_sgr_bg($a);
+
+=head2 write_sgr_fg
+
+ write_sgr_fg($a);
+
+
+=cut
+

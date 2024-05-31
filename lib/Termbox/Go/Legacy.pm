@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_');
-our $VERSION = version->declare('v0.1.1_0');
+our $VERSION = version->declare('v0.2.0_0');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -38,7 +38,7 @@ require bytes; # not use, see https://perldoc.perl.org/bytes
 use Carp qw( croak );
 use Encode;
 use English qw( -no_match_vars );
-use List::Util qw(
+use List::Util 1.29 qw(
   all
   any
 );
@@ -55,7 +55,8 @@ use Params::Util qw(
 use POSIX qw( :errno_h );
 use Scalar::Util qw( readonly );
 use threads;
-use Thread::Queue 3.02;
+use Thread::Queue;
+use Time::HiRes ();
 
 use Termbox::Go::Devel qw(
   __FUNCTION__
@@ -67,12 +68,22 @@ use Termbox::Go::Common qw(
 );
 
 my %module = (
-  MSWin32 => 'Win32',
+  darwin          => 'Terminal',
+  dragonfly       => 'Terminal',
+  freebsd         => 'Terminal',
+  linux           => 'Terminal',
+  netbsd          => 'Terminal',
+  openbsd         => 'Terminal',
+  MSWin32         => 'Win32',
 );
- 
-my $module = $module{$OSNAME} || 'Win32';
-my $termbox = "Termbox::Go::$module";
+# https://stackoverflow.com/a/72575526
+# $module{MSWin32} = 'WinVT' if $ENV{WT_SESSION};
+
+my $module = $module{$OSNAME} || 'Terminal';
+
 require "Termbox/Go/$module.pm";
+my $termbox = "Termbox::Go::$module";
+our @ISA = ($termbox);
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
@@ -742,8 +753,6 @@ BEGIN {
   }
 }
 
-=end comment
-
 =cut
 
 # Create a class derived from L<Tie::Array> for back cells.
@@ -860,8 +869,6 @@ BEGIN {
   }
 }
 
-=end comment
-
 =cut
 
 # ------------------------------------------------------------------------
@@ -877,13 +884,13 @@ sub tb_init { # $result ()
   try: eval {
     $rv = $termbox->Init(@_) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
       $rv = TB_ERR_INIT_OPEN;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -901,8 +908,8 @@ sub tb_shutdown { # $result ()
     $termbox->Close(@_);
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -925,12 +932,12 @@ sub tb_width { # $rows ()
     ($rows) = $termbox->Size(@_);
     $rows //= TB_ERR;
     if ($rows < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -954,12 +961,12 @@ sub tb_height { # $columns ()
     (undef, $cols) = $termbox->Size(@_);
     $cols //= TB_ERR;
     if ($cols < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -976,12 +983,12 @@ sub tb_clear { # $result ()
   try: eval {
     $rv = $termbox->Clear(TB_DEFAULT, TB_DEFAULT) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -998,12 +1005,12 @@ sub tb_present { # $result ()
   try: eval {
     $rv = $termbox->Flush(@_) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1023,12 +1030,12 @@ sub tb_invalidate { # $result ()
     $front_buffer->clear();
     $rv = $termbox->Sync(@_) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1045,12 +1052,12 @@ sub tb_set_cursor { # $result ($cx, $cy)
   try: eval {
     $rv = $termbox->SetCursor(@_) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1059,7 +1066,7 @@ sub tb_set_cursor { # $result ($cx, $cy)
   return $rv;
 }
 
-# The shortcut for L</tb_set_cursor(-1, -1)|tb_set_cursor>.
+# The shortcut for L<tb_set_cursor(-1, -1)|/tb_set_cursor>.
 sub tb_hide_cursor { # $result ()
   return TB_ERR_NOT_INIT if not $IsInit;
   my $rv;
@@ -1067,12 +1074,12 @@ sub tb_hide_cursor { # $result ()
   try: eval {
     $rv = $termbox->HideCursor(@_) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1097,12 +1104,12 @@ sub tb_set_cell { # $result ($x, $y, $ch, $fg, $bg)
   try: eval {
     $rv = $termbox->SetCell($x, $y, chr($ch), $fg, $bg) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1138,12 +1145,12 @@ sub tb_set_input_mode { # $result ($mode)
   try: eval {
     $rv = $termbox->SetInputMode(@_) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1234,12 +1241,12 @@ sub tb_set_output_mode { # $result ($mode)
   try: eval {
     $rv = $termbox->SetOutputMode(@_) // TB_ERR;
     if ($rv < 0) {
-      $last_errno = 0+$!;
+      $last_errno = $!+0;
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1254,7 +1261,7 @@ sub tb_set_output_mode { # $result ($mode)
 # interrupted, yielding a return code of TB_ERR_POLL. In this case, you may
 # check errno via C<$!>. If it's EINTR, you can safely ignore that
 # and call tb_peek_event() again.
-sub tb_peek_event { # $result ($event, $timeout_ms)
+sub tb_peek_event { # $result (\%event, $timeout_ms)
   my ($tb_event, $timeout_ms) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $!  = @_ < 2                ? EINVAL
@@ -1268,20 +1275,23 @@ sub tb_peek_event { # $result ($event, $timeout_ms)
   my $ev;
   local $@;
   try: eval {
-    my $exit = Thread::Queue->new();
-    threads->create(
+    no warnings;                  # supress '... "DEFAULT" not defined'
+    local $SIG{ALRM} = 'DEFAULT'; # supress '...no signal handler set.'
+    my $alarm = threads->create(
       sub {
-        my $timeout = not $exit->dequeue_timed($timeout_ms / 1000);
-        $termbox->Interrupt() if $timeout;
-        return $timeout;
+        local $SIG{ALRM} = sub { threads->exit };
+        Time::HiRes::sleep($timeout_ms / 1000);
+        $termbox->Interrupt();
+        return;
       }
-    )->detach();
+    );
+    $alarm->detach();
     $ev = $termbox->PollEvent();
-    $exit->enqueue(TRUE);
+    $alarm->kill('ALRM');
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1325,7 +1335,7 @@ sub tb_peek_event { # $result ($event, $timeout_ms)
 }
 
 # Same as tb_peek_event except no timeout.
-sub tb_poll_event { # $result ($event)
+sub tb_poll_event { # $result (\%event)
   my ($tb_event) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $!  = @_ < 1                ? EINVAL
@@ -1341,8 +1351,8 @@ sub tb_poll_event { # $result ($event)
     $ev = $termbox->PollEvent();
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1402,14 +1412,14 @@ sub tb_print { # $result ($x, $y, $fg, $bg, $str)
     for my $c (split //, $str) {
       $rv = $termbox->SetCell($x++, $y, $c, $fg, $bg) // TB_ERR;
       if ($rv < 0) {
-        $last_errno = 0+$!;
+        $last_errno = $!+0;
         last;
       }
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1436,14 +1446,14 @@ sub tb_printf { # $result ($x, $y, $fg, $bg, $fmt, @)
     for my $c (split //, $str) {
       $rv = $termbox->SetCell($x++, $y, $c, $fg, $bg) // TB_ERR;
       if ($rv < 0) {
-        $last_errno = 0+$!;
+        $last_errno = $!+0;
         last;
       }
     }
     1;
   } // ($@ ||= 'Died');
-  catch: if ($@ and $!{EINVAL} || $!{E2BIG}) {
-    $last_errno = 0+$!;
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
     croak usage("$!", __FILE__, __FUNCTION__);
   }
   catch: if ($@) {
@@ -1785,7 +1795,7 @@ called before L</tb_init> or after L</tb_shutdown>.
 
  my  $result = tb_hide_cursor();
 
-The shortcut for L</tb_set_cursor(-1, -1)|tb_set_cursor>.
+The shortcut for L<tb_set_cursor(-1, -1)|/tb_set_cursor>.
 
 
 =head2 tb_init

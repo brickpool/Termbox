@@ -1,10 +1,15 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 15;
+use Test::More;
 use Test::Exception;
 
-plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
+if ($^O ne 'MSWin32') {
+  plan skip_all => 'Windows OS required for testing';
+}
+else {
+  plan tests => 15;
+}
 
 use Data::Dumper;
 use Devel::StrictMode;
@@ -28,10 +33,8 @@ sub DbgPrint { # $success ($fmt, @args);
   Win32::OutputDebugString(sprintf($fmt, @args));
 }
 
-our $in = Win32::Console::_GetStdHandle(
-  Win32::Console::constant('STD_INPUT_HANDLE', 0));
-our $out = Win32::Console::_GetStdHandle(
-  Win32::Console::constant('STD_ERROR_HANDLE', 0));
+our $in = Win32::Console::_GetStdHandle(STD_INPUT_HANDLE());
+our $out = Win32::Console::_GetStdHandle(STD_ERROR_HANDLE());
 ok(
   $in > 0 && $out > 0,
   'GetStdHandle()'

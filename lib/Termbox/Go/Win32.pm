@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.1.1_0');
+our $VERSION = version->declare('v0.2.0_0');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -44,7 +44,7 @@ use Params::Util qw(
 use POSIX qw( :errno_h );
 use threads;
 use threads::shared;
-use Thread::Queue;
+use Thread::Queue 3.07;
 use Win32API::File;
 use Win32::Console;
 
@@ -159,30 +159,30 @@ sub Init { # $errno ()
     $! = @_ ? E2BIG : 0;
 
   ($interrupt = create_event())
-    or return ($! = ECHILD);
+    or return $! = ECHILD;
 
   ($in = Win32::Console::_GetStdHandle(STD_INPUT_HANDLE))
-    or return ($! = EBADF);
+    or return $! = EBADF;
   ($out = Win32::Console::_GetStdHandle(STD_OUTPUT_HANDLE))
-    or return ($! = EBADF);
+    or return $! = EBADF;
 
   get_console_mode($in, \$orig_mode)
-    or return ($! = ENXIO);
+    or return $! = ENXIO;
 
   set_console_mode($in, ENABLE_WINDOW_INPUT)
-    or return ($! = ENXIO);
+    or return $! = ENXIO;
 
   ($orig_size, $orig_window) = get_term_size($out);
   my $win_size = get_win_size($out);
 
   set_console_screen_buffer_size($out, $win_size)
-    or return ($! = ENXIO);
+    or return $! = ENXIO;
 
   fix_win_size($out, $win_size)
-    or return ($! = ENXIO);
+    or return $! = ENXIO;
 
   get_console_cursor_info($out, $orig_cursor_info)
-    or return ($! = ENXIO);
+    or return $! = ENXIO;
 
   show_cursor(FALSE);
   ($term_size) = get_term_size($out);
@@ -214,7 +214,6 @@ sub Close { # $errno ()
   $cancel_comm->enqueue(TRUE);
   set_event($interrupt);
   select: {
-    lock $input_comm;
     case: $input_comm->pending() and do {
       $input_comm->dequeue($input_comm->pending());
       last;
@@ -240,7 +239,6 @@ sub Interrupt { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  lock $input_comm;
   $input_comm->insert(0, Event{Type => EventInterrupt});
   # $interrupt_comm->enqueue({});
   return 0;
@@ -330,8 +328,10 @@ sub SetCell { # $errno ($x, $y, $ch, $fg, $bg)
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $!  = @_ < 5                    ? EINVAL
         : @_ > 5                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
+        : !defined(_NUMBER($x))     ? EINVAL
+        : $x - int($x)              ? EINVAL
+        : !defined(_NUMBER($y))     ? EINVAL
+        : $y - int($y)              ? EINVAL
         : !defined(_STRING($ch))    ? EINVAL
         : !defined(_NONNEGINT($fg)) ? EINVAL
         : !defined(_NONNEGINT($bg)) ? EINVAL
@@ -371,11 +371,13 @@ sub SetChar { # $errno ($x, $y, $ch)
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   my ($x, $y, $ch) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 3                    ? EINVAL
-        : @_ > 3                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
-        : !defined(_STRING($ch))    ? EINVAL
+    $!  = @_ < 3                  ? EINVAL
+        : @_ > 3                  ? E2BIG
+        : !defined(_NUMBER($x))     ? EINVAL
+        : $x - int($x)              ? EINVAL
+        : !defined(_NUMBER($y))     ? EINVAL
+        : $y - int($y)              ? EINVAL
+        : !defined(_STRING($ch))  ? EINVAL
         : undef
         ;
 
@@ -398,8 +400,10 @@ sub SetFg { # $errno ($x, $y, $fg)
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $!  = @_ < 3                    ? EINVAL
         : @_ > 3                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
+        : !defined(_NUMBER($x))     ? EINVAL
+        : $x - int($x)              ? EINVAL
+        : !defined(_NUMBER($y))     ? EINVAL
+        : $y - int($y)              ? EINVAL
         : !defined(_NONNEGINT($fg)) ? EINVAL
         : undef
         ;
@@ -423,8 +427,10 @@ sub SetBg { # $errno ($x, $y, $bg)
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $!  = @_ < 3                    ? EINVAL
         : @_ > 3                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
+        : !defined(_NUMBER($x))     ? EINVAL
+        : $x - int($x)              ? EINVAL
+        : !defined(_NUMBER($y))     ? EINVAL
+        : $y - int($y)              ? EINVAL
         : !defined(_NONNEGINT($bg)) ? EINVAL
         : undef
         ;
@@ -459,11 +465,9 @@ sub PollEvent { # \%Event ()
 
   select: {
     my $ev;
-    lock $input_comm;
     case: ($ev = $input_comm->dequeue()) and 
       return { %$ev }; # must be a copy
     q/*
-    lock $interrupt_comm;
     case: $interrupt_comm->dequeue_nb() and
       return Event{Type => EventInterrupt};
     */ if 0;
@@ -764,7 +768,7 @@ the specified position.
 
 =head2 SetInputMode
 
- my $mode = SetInputMode($mode);
+ my $current = SetInputMode($mode);
 
 Sets termbox input mode. Termbox has two input modes:
 
@@ -783,7 +787,7 @@ If I<$mode> is 'InputCurrent', returns the current input mode. See also
 
 =head2 SetOutputMode
 
- my $mode = SetOutputMode();
+ my $current = SetOutputMode($mode);
 
 Sets the termbox output mode.
 
