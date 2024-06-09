@@ -707,12 +707,11 @@ sub flush { # $succeded ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  syswrite($out, $outstr);
-  my $err = $!+0;
+  $outbuf->flush();
+  my $err = defined(syswrite($out, $outstr)) ? 0 : $!+0;
   $outbuf->seek(0, 0);
-  $err = $!+0 if $err == 0;
+  $err ||= $!+0;
   $outstr = '';
-
   return $err ? undef : "0E0";
 }
 
