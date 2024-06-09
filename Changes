@@ -1,18 +1,18 @@
 Revision history for Termbox::Go
 
-Unreleased
-        2024-05-31
+0.003   2024-06-06
         - Add Windows VT support
+        - bug fixes
 
-0.002	2024-05-31
-	- Add Terminal support
+0.002   2024-05-31
+        - Add Terminal support
 
 0.001_001
-	2024-05-16
+        2024-05-16
         - Upload to github
         - Publication of the first release
-	- Improvements and bug fixes
+        - Improvements and bug fixes
 
-0.001	2024-04-24
-	- First release (Win32 only support)
+0.001  2024-04-24
+        - First release (Win32 only support)
         - Add Legacy support

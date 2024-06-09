@@ -13,12 +13,9 @@
 - Win32::API calls, e.g. WriteConsoleOutputW
 
 ## Windows Terminal Support
-- Windows Terminal is xterm-256color compatible.
-  https://github.com/microsoft/terminal/issues/6045#issuecomment-631645277
+
 - .terminfo for Windows Terminal
   https://github.com/microsoft/terminal/issues/6045#issue-621913687
-- Windows Mouse Support
-  https://github.com/microsoft/terminal/issues/10321#issuecomment-855083607
 
 The stdin Handle can be redirected. We must check the type of the handle before
 call an appropriate API function via GetFileType:
@@ -28,7 +25,7 @@ call an appropriate API function via GetFileType:
 Otherwise ReadConsoleInput will fail.
 
 ## Legacy Support
+
 - termbox2 compatible color indexing for the legacy implementation
 - providing TB_BRIGHT, TB_HI_BLACK
 - providing TB_STRIKEOUT, TB_UNDERLINE_2, TB_OVERLINE
-

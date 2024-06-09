@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.2.0_0');
+our $VERSION = version->declare('v0.3.0_0');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -231,8 +231,8 @@ sub Close { # $errno ()
   return 0;
 }
 
-# Interrupt an in-progress call to PollEvent by causing it to return
-# EventInterrupt.  Note that this function will block until the PollEvent
+# Interrupt an in-progress call to L</PollEvent> by causing it to return
+# EventInterrupt.  Note that this function will block until the L</PollEvent>
 # function has successfully been interrupted.
 sub Interrupt { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
@@ -311,7 +311,7 @@ sub SetCursor { # $errno ($x, $y)
   return 0;
 }
 
-# The shortcut for SetCursor(-1, -1).
+# The shortcut for L<SetCursor(-1, -1)|/SetCursor>.
 sub HideCursor { # $errno ()
   my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
   croak(usage("$!", __FILE__, __FUNCTION__)) if
@@ -715,8 +715,8 @@ Example usage:
 
  my $errno = Interrupt();
 
-Interrupt an in-progress call to PollEvent by causing it to return
-EventInterrupt.  Note that this function will block until the PollEvent
+Interrupt an in-progress call to L</PollEvent> by causing it to return
+EventInterrupt.  Note that this function will block until the L</PollEvent>
 function has successfully been interrupted.
 
 

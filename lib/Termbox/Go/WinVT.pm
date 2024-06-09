@@ -1,8 +1,6 @@
 # ------------------------------------------------------------------------
 #
-#   Terminal Termbox implementation
-#
-#   Code based on termbox-go v1.1.1, 21 April 2021
+#   Winndows Terminal Termbox implementation
 #
 #   Copyright (C) 2012 termbox-go authors
 #
@@ -10,7 +8,7 @@
 #   Author: 2024 J. Schneider
 # ------------------------------------------------------------------------
 
-package Termbox::Go::Terminal;
+package Termbox::Go::WinVT;
 
 # ------------------------------------------------------------------------
 # Boilerplate ------------------------------------------------------------
@@ -33,43 +31,45 @@ our $AUTHORITY = 'github:brickpool';
 # Imports ----------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-require bytes; # not use, see https://perldoc.perl.org/bytes
 use Carp qw( croak );
-use English qw( -no_match_vars );
 use Fcntl;
-use Params::Util qw(
-  _STRING
-  _INVOCANT
-  _NUMBER
+use Params::Util qw( 
   _NONNEGINT
-  _SCALAR0
+  _INVOCANT
 );
-use POSIX qw(
-  :errno_h
-  :termios_h
-  !tcsetattr
-  !tcgetattr
-);
+use POSIX qw( :errno_h );
 use threads;
 use threads::shared;
 use Thread::Queue 3.07;
-use Time::HiRes ();
-use Unicode::EastAsianWidth;
+use Win32::API;
+use Win32::Console;
+use Win32API::File qw(
+  :Misc
+  :Func
+  :FILE_TYPE_
+);
 
 use Termbox::Go::Common qw(
-  :all
-  !:keys
-  !:mode
-  !:attr
+  :bool
+  :const
+  :color
+  :input
+  :vars
 );
 use Termbox::Go::Devel qw(
+  :all
   __FUNCTION__
   usage
 );
-use Termbox::Go::Terminal::Backend qw( :all );
-use Termbox::Go::Terminfo qw( :func );
+use Termbox::Go::Terminal;
+use Termbox::Go::Terminal::Backend qw( 
+  coord_invalid
+  attr_invalid
+  input_event
+  :vars
+);
+use Termbox::Go::Terminfo qw( setup_term_builtin );
 use Termbox::Go::Terminfo::Builtin qw( :index );
-use Termbox::Go::WCWidth qw( wcwidth );
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
@@ -151,6 +151,105 @@ our %EXPORT_TAGS = (
 }
 
 # ------------------------------------------------------------------------
+# Constants --------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+# Windows Error Codes
+use constant {
+  WSAEWOULDBLOCK => 0x2733,
+};
+
+# Windows INPUT_RECORD EventType
+use constant {
+  KEY_EVENT   => 0x0001,
+  MOUSE_EVENT => 0x0002,
+};
+
+# Input mode flags
+use constant {
+  ENABLE_INSERT_MODE => 0x0020,
+  ENABLE_QUICK_EDIT_MODE => 0x0040,
+  ENABLE_VIRTUAL_TERMINAL_INPUT => 0x0200,
+  ENABLE_EXTENDED_FLAGS => 0x0080,
+};
+
+# Output mode flags
+use constant {
+  ENABLE_VIRTUAL_TERMINAL_PROCESSING => 0x0004,
+  DISABLE_NEWLINE_AUTO_RETURN => 0x0008,
+  ENABLE_LVB_GRID_WORLDWIDE => 0x0010,
+};
+
+# Windows codepage's
+use constant {
+  CP_UTF8 => 65001,
+};
+
+# Windows read console index
+use constant {
+  _event_type   => 0,
+  _key_down     => 1,
+  _repeat_count => 2,
+  _ascii_char   => 5,
+};
+
+use constant {
+  kernel32 => "kernel32.dll",
+};
+
+# ------------------------------------------------------------------------
+# Variables --------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+# Windows VT support
+my $supportsVT;
+my $notify;
+my $orig_mode_in;
+my $orig_mode_out;
+my $orig_cp_out;
+
+# ------------------------------------------------------------------------
+# SysCalls ---------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+my $peek_named_pipe;
+BEGIN {
+  $peek_named_pipe = Win32::API->new(kernel32,
+    'PeekNamedPipe', 'NPIPPP', 'N'
+  ) or die "Import PeekNamedPipe: $^E";
+}
+
+# ------------------------------------------------------------------------
+# Backend ----------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+# The call to Term::ReadKey::GetTerminalSize did not work if the handle was 
+# redirected or duplicated, so we need to mock the original 
+# Terminal::Backend::get_term_size() subroutine.
+sub get_term_size { # $cols, $rows ($fd)
+  my ($fd) = @_;
+  croak(usage("$!", __FILE__, __FUNCTION__)) if
+    $!  = @_ < 1                    ? EINVAL
+        : @_ > 1                    ? E2BIG
+        : !defined(_NONNEGINT($fd)) ? EINVAL
+        : 0;
+        ;
+
+  my $hConsole = FdGetOsFHandle($fd) // INVALID_HANDLE_VALUE;
+  my ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($hConsole);
+  if (!$col || !$row) {
+    $! = ENOTTY;
+    return;
+  }
+  return ($col, $row);
+}
+
+{
+  no warnings 'redefine';
+  *Termbox::Go::Terminal::Backend::get_term_size = \&get_term_size;
+}
+
+# ------------------------------------------------------------------------
 # Functions --------------------------------------------------------------
 # ------------------------------------------------------------------------
 
@@ -171,6 +270,7 @@ sub Init { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
+  TRACE_VOID();
   if ($IsInit) {
     return 0;
   }
@@ -178,25 +278,15 @@ sub Init { # $errno ()
   my $err;
 
   use open IO => ':raw'; # https://github.com/Perl/perl5/issues/17665
-  if ($OSNAME eq "openbsd" || $OSNAME eq "freebsd") {
-    $err = sysopen($out, "/dev/tty", O_RDWR, 0) ? 0 : $!+0;
-    if ($err != 0) {
-      return $err;
-    }
-    *IN = $out;
-    $in = fileno($out);
-  } else {
-    $err = sysopen($out, "/dev/tty", O_WRONLY, 0) ? 0 : $!+0;
-    if ($err != 0) {
-      return $err;
-    }
-    $err = sysopen(IN, "/dev/tty", O_RDONLY, 0) ? 0 : $!+0;
-    $err = $!+0;
-    if ($err != 0) {
-      return $err;
-    }
-    $in = fileno(\*IN);
+  $err = sysopen($out, 'CONOUT$', O_RDWR) ? 0 : $!+0;
+  if ($err != 0) {
+    return $err;
   }
+  $err = sysopen(IN, 'CONIN$', O_RDWR) ? 0 : $!+0;
+  if ($err != 0) {
+    return $err;
+  }
+  $in = fileno(\*IN);
 
   # Note: the following statement was not verified when porting to perl
   #
@@ -207,45 +297,184 @@ sub Init { # $errno ()
   # descriptor has been made nonblocking (see below).
   $outfd = fileno($out);
 
-  $err = setup_term() ? 0 : $!+0;
-  if ($err != 0) {
-    $@ = sprintf("termbox: error while reading terminfo data: %s", $!);
-    return $err;
+  $notify = threads->create(sub {
+    TRACE_VOID();
+    # references
+    # https://metacpan.org/pod/Win32::PowerShell::IPC#PeekNamedPipe
+    # https://stackoverflow.com/a/73571717
+    local $SIG{'KILL'} = sub { threads->exit() };
+    my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
+    if ($hInput == INVALID_HANDLE_VALUE) {
+      return SET_ERROR($!, EBADF, 'FdGetOsFHandle');
+    }
+    my $hOutput = FdGetOsFHandle($outfd) // INVALID_HANDLE_VALUE;
+    if ($hOutput == INVALID_HANDLE_VALUE) {
+      return SET_ERROR($!, EBADF, 'FdGetOsFHandle');
+    }
+    my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
+    DEBUG_FMT('FileType: %d', $uFileType);
+    for (;;) {
+      switch: for ($uFileType) {
+        case: $_ == FILE_TYPE_CHAR and do {
+          local $_;
+          # Get the number of unread input records in the input buffer of the 
+          # console. This includes keyboard and mouse events, but also events
+          # for resizing.
+          $^E = 0;
+          my $cNumberOfEvents
+            = Win32::Console::_GetNumberOfConsoleInputEvents($hInput);
+          if ($^E) {
+            return SET_FAIL($!, 'GetNumberOfConsoleInputEvents');
+          }
+          $cNumberOfEvents //= 0;
+          if ($cNumberOfEvents > 0) {
+            $^E = 0;
+            my ($eventType) = Win32::Console::_PeekConsoleInput($hInput);
+            if ($^E) {
+              return SET_FAIL($!, 'PeekConsoleInput');
+            }
+            $eventType //= 0;
+            switch: for ($eventType) {
+              case: $_ == KEY_EVENT and do {
+                DEBUG('KEY_EVENT') unless $sigio->pending();
+                $sigio->pending() or $sigio->enqueue(TRUE);
+                last;
+              };
+              case: $_ == MOUSE_EVENT and do {
+                DEBUG('MOUSE_EVENT');
+                last;
+              };
+              default: {
+                state $col = 0;
+                state $row = 0;
+                # Win32::Console::_PeekConsoleInput returns false if it is not 
+                # a keyboard or mouse event. Means we receive a event type 
+                # FOCUS_EVENT, MENU_EVENT or WINDOW_BUFFER_SIZE_EVENT.
+                $^E = 0;
+                my ($curr_col, $curr_row) 
+                  = Win32::Console::_GetConsoleScreenBufferInfo($hOutput);
+                if ($^E) {
+                  SET_FAIL($!, 'GetConsoleScreenBufferInfo');
+                }
+                $curr_col //= 0;
+                $curr_row //= 0;
+                if ($curr_col != $col || $curr_row != $row) {
+                  DEBUG('WINDOW_BUFFER_SIZE_EVENT') unless $sigwinch->pending();
+                  $sigwinch->pending() or $sigwinch->enqueue(TRUE);
+                  ($col, $row) = ($curr_col, $curr_row);
+                }
+              } # default
+            } # switch: for ($eventType)
+          } # if ($cNumberOfEvents)
+          last;
+        };
+        case: $_ == FILE_TYPE_DISK ||
+              $_ == FILE_TYPE_PIPE and do {
+          my $bytesAvailable = 0;
+          # PeekNamedPipe(hInput, NULL, NULL, NULL, &bytesAvailable, NULL)
+          my $lpTotalBytesAvail = pack('L', 0);
+          $peek_named_pipe->Call($hInput, undef, 0, undef, $lpTotalBytesAvail, 
+            undef) or return;
+          $bytesAvailable = unpack('L', $lpTotalBytesAvail);
+          if ($bytesAvailable > 0) {
+            DEBUG('KEY_EVENT') unless $sigio->pending();
+            $sigwinch->pending() or $sigio->enqueue(TRUE);
+          }
+          last;
+        };
+        default: {
+          return SET_FAIL($!, 'unknown FileType');
+        }
+      }
+      # Wait 20 millis for more data
+      Time::HiRes::sleep(20/1000);
+    }
+  });
+  $notify->detach();
+
+  # Set the input mode.
+  {
+    my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
+    if ($hInput == INVALID_HANDLE_VALUE) {
+      return $! = EBADF;
+    }
+    $^E = 0;
+    $orig_mode_in = Win32::Console::_GetConsoleMode($hInput);
+    if ($^E) {
+      return $! = ENXIO;
+    }
+    my $mode = $orig_mode_in;
+    $mode &= ~ENABLE_ECHO_INPUT;      # Turn off echo in a terminal
+    $mode &= ~ENABLE_LINE_INPUT;      # no CR for ReadFile or ReadConsole
+    $mode |= ENABLE_WINDOW_INPUT;     # Report changes in buffer size
+    $mode &= ~ENABLE_PROCESSED_INPUT; # Report CTRL+C and SHIFT+Arrow events.
+    $mode |= ENABLE_EXTENDED_FLAGS;   # Disable the Quick Edit mode,
+    $mode &= ~ENABLE_QUICK_EDIT_MODE; # which inhibits the mouse.
+    $mode |= ENABLE_VIRTUAL_TERMINAL_INPUT; # Allow ANSI escape sequences.
+    $^E = 0;
+    Win32::Console::_SetConsoleMode($hInput, $mode);
+    if ($^E) {
+      return $! = ENXIO;
+    }
   }
 
-  $SIG{'WINCH'} = sub {
-    $sigwinch->pending() or $sigwinch->enqueue(TRUE);
-  };
-  $SIG{'IO'} = sub {
-    $sigio->pending() or $sigio->enqueue(TRUE);
-  };
-
-  $err = fcntl(IN, F_SETFL, O_ASYNC|O_NONBLOCK) ? 0 : $!+0;
-  if ($err != 0) {
-    return $err;
+  # Set the output mode.
+  {
+    my $hOutput = FdGetOsFHandle($outfd) // INVALID_HANDLE_VALUE;
+    if ($hOutput == INVALID_HANDLE_VALUE) {
+      return $! = EBADF;
+    }
+    $^E = 0;
+    $orig_mode_out = Win32::Console::_GetConsoleMode($hOutput);
+    if ($^E) {
+      return $! = ENXIO;
+    }
+    my $mode = $orig_mode_out;
+    $mode |= ENABLE_PROCESSED_OUTPUT;     # enable when using escape sequences.
+    $mode &= ~ENABLE_WRAP_AT_EOL_OUTPUT;  # Avoid scrolling when reaching EOL.
+    $mode |= DISABLE_NEWLINE_AUTO_RETURN; # Do not do CR on LF.
+    $mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING; # Allow ANSI escape sequences.
+    $^E = 0;
+    Win32::Console::_SetConsoleMode($hOutput, $mode);
+    if ($^E) {
+      return $! = ENXIO;
+    }
+    $supportsVT = do {
+      $^E = 0;
+      $mode = Win32::Console::_GetConsoleMode($hOutput);
+      if ($^E) {
+        return $! = ENXIO;
+      }
+      $mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    };
   }
-  $err = fcntl(IN, F_SETOWN, $PID) ? 0 : $!+0;
-  if ($OSNAME ne "darwin" && $err != 0) {
-    return $err;
+
+  # Set codepage to utf8
+  {
+    $^E = 0;
+    $orig_cp_out = Win32::Console::_GetConsoleOutputCP();
+    if ($^E) {
+      return $! = ENXIO;
+    }
+    if (!Win32::Console::_SetConsoleOutputCP(65001)) {
+      return $! = ENXIO;
+    }
   }
 
-  $err = tcgetattr($outfd, $orig_tios);
-  if ($err != 0) {
-    return $err;
-  }
-
-  my $tios = { %$orig_tios };
-  $tios->{Iflag} &= ~(IGNBRK | BRKINT | PARMRK |
-    ISTRIP | INLCR | IGNCR | ICRNL | IXON);
-  $tios->{Lflag} &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-  $tios->{Cflag} &= ~(CSIZE | PARENB);
-  $tios->{Cflag} |= CS8;
-  $tios->{Cc}->[VMIN] = 1;
-  $tios->{Cc}->[VTIME] = 0;
-
-  $err = tcsetattr($outfd, $tios);
-  if ($err != 0) {
-    return $err;
+  # Windows Terminal is xterm-256color compatible
+  {
+    if (!$supportsVT) {
+      return $! = ENOTTY;
+    }
+    # https://github.com/microsoft/terminal/issues/6045#issuecomment-631645277
+    # https://superuser.com/a/1691012
+    my $env = $ENV{"TERM"};
+    $ENV{"TERM"} ||= 'xterm-256color';
+    $err = setup_term_builtin() ? 0 : $!+0;
+    if ($err != 0) {
+      return $err;
+    }
+    $ENV{"TERM"} = $env;
   }
 
   syswrite($out, $funcs->[t_enter_ca]);
@@ -261,31 +490,68 @@ sub Init { # $errno ()
   # $front_buffer->clear();
 
   threads->create(sub {
+    TRACE_VOID();
     use bytes;
     my $buf = "\0" x 128;
+    my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
+    if ($hInput == INVALID_HANDLE_VALUE) {
+      return SET_ERROR($!, EBADF, 'FdGetOsFHandle');
+    }
+    my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
     for (;;) {
       select: {
         case: $sigio->dequeue_nb() and do {
+          DEBUG('sigio dequeued');
           for (;;) {
-            my $n = sysread(IN, $buf, 128) // 0;
-            my $err = $!+0;
-            if ($err == EAGAIN || $err == EWOULDBLOCK) {
+            my $n = 0;
+            $^E = 0;
+            switch: for ($uFileType) {
+              case: $_ == FILE_TYPE_CHAR and do {
+                my $cNumberOfEvents 
+                  = Win32::Console::_GetNumberOfConsoleInputEvents($hInput) // 0;
+                while ($cNumberOfEvents--) {
+                  if (my @ir = Win32::Console::_ReadConsoleInput($hInput)) {
+                    if ($ir[_event_type] == KEY_EVENT && $ir[_key_down]) {
+                      while ($ir[_repeat_count]--) {
+                        substr($buf, $n++, 1) = chr($ir[_ascii_char]);
+                      }
+                    }
+                  }
+                }
+                if ($n == 0) {
+                  $^E ||= WSAEWOULDBLOCK;
+                }
+                last;
+              };
+              case: $_ == FILE_TYPE_DISK || $_ == FILE_TYPE_PIPE and do {
+                return SET_FAIL($!, 'not implemented');
+              };
+              default: {
+                return SET_FAIL($!, 'unknown FileType');
+              }
+            }
+            DEBUG_FMT("read %d bytes", $n) if $n;
+            my $err = $^E+0;
+            if ($err) {
+              DEBUG_FMT("System Error Code: %d", $err) if $err;
               last;
             }
             select: {
               my $ie;
               case: ($ie = input_event(substr($buf, 0, $n), $err)) and do {
+                DEBUG_FMT('enqueue {%s} to input_comm', "@{[%$ie]}");
                 $input_comm->enqueue($ie);
+                DEBUG('done');
                 substr($buf, $n, 128) = "\0" x 128;
               };
               case: $quit->dequeue_nb() and do {
-                return 0;
+                return 0+RETURN_OK;
               };
             }
           }
         };
         case: $quit->dequeue_nb() and do {
-          return 0;
+          return 0+RETURN_OK;
         };
       }
     }
@@ -299,12 +565,7 @@ sub Init { # $errno ()
 # EventInterrupt.  Note that this function will block until the L</PollEvent>
 # function has successfully been interrupted.
 sub Interrupt { # $errno ()
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : 0;
-
-  $interrupt_comm->enqueue({});
-  return 0;
+  goto &Termbox::Go::Terminal::Interrupt;
 }
 
 # Finalizes termbox library, should be called after successful initialization 
@@ -314,6 +575,7 @@ sub Close { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
+  TRACE_VOID();
   if (!$IsInit) {
     return $! = EBADF;
   }
@@ -325,10 +587,43 @@ sub Close { # $errno ()
   syswrite($out, $funcs->[t_exit_ca]);
   syswrite($out, $funcs->[t_exit_keypad]);
   syswrite($out, $funcs->[t_exit_mouse]);
-  tcsetattr($outfd, $orig_tios);
 
-  $SIG{'WINCH'} = 'DEFAULT';
-  $SIG{'IO'} = 'DEFAULT';
+  my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
+  if ($hInput == INVALID_HANDLE_VALUE) {
+    return $! = EBADF;
+  }
+  if (defined $orig_mode_in) {
+    $^E = 0;
+    Win32::Console::_SetConsoleMode($hInput, $orig_mode_in);
+    if ($^E) {
+      return $! = ENXIO;
+    }
+    undef $orig_mode_in;
+  }
+
+  my $hOutput = FdGetOsFHandle($outfd) // INVALID_HANDLE_VALUE;
+  if ($hOutput == INVALID_HANDLE_VALUE) {
+    return $! = EBADF;
+  }
+  if (defined $orig_mode_out) {
+    $^E = 0;
+    Win32::Console::_SetConsoleMode($hOutput, $orig_mode_out);
+    if ($^E) {
+      return $! = ENXIO;
+    }
+    undef $orig_mode_out;
+  }
+
+  if ($notify) {
+    $notify->kill('KILL');
+    undef $notify;
+  }
+  if (defined $orig_cp_out) {
+    if (!Win32::Console::_SetConsoleOutputCP($orig_cp_out)) {
+      return $! = ENXIO;
+    }
+    undef $orig_cp_out;
+  }
 
   close($out);
   close(IN);
@@ -353,228 +648,53 @@ sub Close { # $errno ()
 
 # Synchronizes the internal back buffer with the terminal.
 sub Flush { # $errno ()
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : 0;
-
-  # invalidate cursor position
-  $lastx = coord_invalid;
-  $lasty = coord_invalid;
-
-  update_size_maybe();
-
-  for (my $y = 0; $y < $front_buffer->{height}; $y++) {
-    my $line_offset = $y * $front_buffer->{width};
-    for (my $x = 0; $x < $front_buffer->{width}; ) {
-      my $cell_offset = $line_offset + $x;
-      my $back = $back_buffer->{cells}->[$cell_offset];
-      my $front = $front_buffer->{cells}->[$cell_offset];
-      if ($back->{Ch} < ord(' ')) {
-        $back->{Ch} = ord(' ');
-      }
-      my $w = wcwidth($back->{Ch});
-      my $ch = chr($back->{Ch});
-      utf8::upgrade($ch);
-      if ($w <= 0 || $w == 2 && $ch =~ /\p{InEastAsianAmbiguous}/) {
-        $w = 1;
-      }
-      if ( $back->{Ch} == $front->{Ch}
-        && $back->{Fg} == $front->{Fg}
-        && $back->{Bg} == $front->{Bg}
-      ) {
-        $x += $w;
-        next;
-      }
-      $front = { %$back };
-      send_attr($back->{Fg}, $back->{Bg});
-
-      if ($w == 2 && $x == $front_buffer->{width} - 1) {
-        # there's not enough space for 2-cells unicode,
-        # let's just put a space in there
-        send_char($x, $y, ' ');
-      } else {
-        send_char($x, $y, $ch);
-        if ($w == 2) {
-          my $next = $cell_offset + 1;
-          $front_buffer->{cells}->[$next] = Cell{
-            Ch => 0,
-            Fg => $back->{Fg},
-            Bg => $back->{Bg},
-          };
-        }
-      }
-      $x += $w;
-    }
-  }
-  if (!is_cursor_hidden($cursor_x, $cursor_y)) {
-    write_cursor($cursor_x, $cursor_y);
-  }
-  return flush() ? $!+0 : 0;
+  goto &Termbox::Go::Terminal::Flush;
 }
 
 # Sets the position of the cursor. See also L</HideCursor>.
 sub SetCursor { # $errno ($x, $y)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($x, $y) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 2                ? EINVAL
-        : @_ > 2                ? E2BIG
-        : !defined(_NUMBER($x)) ? EINVAL
-        : !defined(_NUMBER($y)) ? EINVAL
-        : undef
-        ;
-
-  if (is_cursor_hidden($cursor_x, $cursor_y) && !is_cursor_hidden($x, $y)) {
-    $outbuf->print($funcs->[t_show_cursor]);
-  }
-
-  if (!is_cursor_hidden($cursor_x, $cursor_y) && is_cursor_hidden($x, $y)) {
-    $outbuf->print($funcs->[t_hide_cursor]);
-  }
-
-  ($cursor_x, $cursor_y) = ($x, $y);
-  if (!is_cursor_hidden($cursor_x, $cursor_y)) {
-    write_cursor($cursor_x, $cursor_y)
-  }
-  return 0;
+  goto &Termbox::Go::Terminal::SetCursor;
 }
 
 # The shortcut for L<SetCursor(-1, -1)|/SetCursor>.
 sub HideCursor { # $errno ()
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : 0;
-
-  return SetCursor(cursor_hidden, cursor_hidden);
+  goto &Termbox::Go::Terminal::HideCursor;
 }
 
 # Changes cell's parameters in the internal back buffer at the specified
 # position.
 sub SetCell { # $errno ($x, $y, $ch, $fg, $bg)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($x, $y, $ch, $fg, $bg) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 5                    ? EINVAL
-        : @_ > 5                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
-        : !defined(_STRING($ch))    ? EINVAL
-        : !defined(_NONNEGINT($fg)) ? EINVAL
-        : !defined(_NONNEGINT($bg)) ? EINVAL
-        : undef
-        ;
-
-  if ($x >= $back_buffer->{width}) {
-    return $! = EOVERFLOW;
-  }
-  if ($y >= $back_buffer->{height}) {
-    return $! = EOVERFLOW;
-  }
-
-  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x] 
-    = Cell(ord($ch), $fg, $bg);
-  return 0;
+  goto &Termbox::Go::Terminal::SetCell;
 }
 
 # Returns the specified cell from the internal back buffer.
 sub GetCell { # \%Cell ($x, $y)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($x, $y) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 2                    ? EINVAL
-        : @_ > 2                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
-        : undef
-        ;
-
-  return { %{$back_buffer->{cells}->[$y*$back_buffer->{width} + $x]} };
+  goto &Termbox::Go::Terminal::GetCell;
 }
 
 # Changes cell's character (utf8) in the internal back buffer at 
 # the specified position.
 sub SetChar { # $errno ($x, $y, $ch)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($x, $y, $ch) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 3                    ? EINVAL
-        : @_ > 3                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
-        : !defined(_STRING($ch))    ? EINVAL
-        : undef
-        ;
-
-  if ($x >= $back_buffer->{width}) {
-    return $! = EOVERFLOW;
-  }
-  if ($y >= $back_buffer->{height}) {
-    return $! = EOVERFLOW;
-  }
-
-  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x]->{Ch} = ord($ch);
-  return 0;
+  goto &Termbox::Go::Terminal::SetChar;
 }
 
 # Changes cell's foreground attributes in the internal back buffer at
 # the specified position.
 sub SetFg { # $errno ($x, $y, $fg)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($x, $y, $fg) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 3                    ? EINVAL
-        : @_ > 3                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
-        : !defined(_NONNEGINT($fg)) ? EINVAL
-        : undef
-        ;
-
-  if ($x >= $back_buffer->{width}) {
-    return $! = EOVERFLOW;
-  }
-  if ($y >= $back_buffer->{height}) {
-    return $! = EOVERFLOW;
-  }
-
-  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x]->{Fg} = $fg;
-  return 0;
+  goto &Termbox::Go::Terminal::SetFg;
 }
 
 # Changes cell's background attributes in the internal back buffer at
 # the specified position.
 sub SetBg { # $errno ($x, $y, $bg)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($x, $y, $bg) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 3                    ? EINVAL
-        : @_ > 3                    ? E2BIG
-        : !defined(_NONNEGINT($x))  ? EINVAL
-        : !defined(_NONNEGINT($y))  ? EINVAL
-        : !defined(_NONNEGINT($bg)) ? EINVAL
-        : undef
-        ;
-
-  if ($x >= $back_buffer->{width}) {
-    return $! = EOVERFLOW;
-  }
-  if ($y >= $back_buffer->{height}) {
-    return $! = EOVERFLOW;
-  }
-
-  $back_buffer->{cells}->[$y*$back_buffer->{width} + $x]->{Bg} = $bg;
-  return 0;
+  goto &Termbox::Go::Terminal::SetBg;
 }
 
 # Returns a slice into the termbox's back buffer. You can get its dimensions
 # using L</Size> function. The slice remains valid as long as no L</Clear> or
 # L</Flush> function calls were made after call to this function.
 sub CellBuffer { # \@ ()
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : 0;
-
-  return $back_buffer->{cells};
+  goto &Termbox::Go::Terminal::CellBuffer;
 }
 
 # After getting a raw event from PollRawEvent function call, you can parse it
@@ -589,21 +709,7 @@ sub CellBuffer { # \@ ()
 #
 # B<NOTE>: This API is experimental and may change in future.
 sub ParseEvent { # \%event ($data)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my $data = \$_[0];
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 1                    ? EINVAL
-        : @_ > 1                    ? E2BIG
-        : !defined(_SCALAR0($data)) ? EINVAL
-        : undef
-        ;
-
-  my $event = Event{Type => EventKey};
-  my $status = extract_event($data, $event, FALSE);
-  if ($status != event_extracted) {
-    return Event{Type => EventNone, N => $event->{N}};
-  }
-  return $event;
+  goto &Termbox::Go::Terminal::ParseEvent;
 }
 
 # Wait for an event and return it. This is a blocking function call. Instead
@@ -614,122 +720,12 @@ sub ParseEvent { # \%event ($data)
 #
 # B<NOTE>: This API is experimental and may change in future.
 sub PollRawEvent { # \%event ($data)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my $data = \$_[0];
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 1                    ? EINVAL
-        : @_ > 1                    ? E2BIG
-        : !defined(_SCALAR0($data)) ? EINVAL
-        : undef
-        ;
-
-  if (!length(_STRING($_[0]))) {
-    croak('length($data) >= 1 is a requirement');
-  }
-
-  my $event = Event();
-  if (extract_raw_event($data, $event)) {
-    return $event;
-  }
-
-  for (;;) {
-    select: {
-      case: $input_comm->pending() and do {
-        my $ev = $input_comm->dequeue();
-        if ($ev->{err}) {
-          return Event{Type => EventError, Err => $ev->{err}};
-        }
-        $inbuf .= $ev->{data} // '';
-        if (extract_raw_event($data, $event)) {
-          return $event;
-        }
-      };
-      case: $interrupt_comm->dequeue_nb() and do {
-        $event->{Type} = EventInterrupt;
-        return $event;
-      };
-      case: $sigwinch->dequeue_nb() and do {
-        $event->{Type} = EventResize;
-        ($event->{Width}, $event->{Height}) = get_term_size($outfd);
-        return $event;
-      };
-    }
-  }
+  goto &Termbox::Go::Terminal::PollRawEvent;
 }
 
 # Wait for an event and return it. This is a blocking function call.
 sub PollEvent { # \%Event ()
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : 0;
-
-  # Constant governing macOS specific behavior. See https://github.com/nsf/termbox-go/issues/132
-  # This is an arbitrary delay which hopefully will be enough time for any lagging
-  # partial escape sequences to come through.
-  use constant esc_wait_delay => 100/1000; # 100 ms
-
-  my $event = Event();
-  my $esc_timeout = 0;
-  my $esc_wait_timer = FALSE;
-
-  # try to extract event from input buffer, return on success
-  $event->{Type} = EventKey;
-  my $status = extract_event(\$inbuf, $event, TRUE);
-  if ($event->{N} != 0) {
-    $inbuf = bytes::substr($inbuf, $event->{N});
-  }
-  if ($status == event_extracted) {
-    return $event;
-  } elsif ($status == esc_wait) {
-    $esc_wait_timer = TRUE;
-    $esc_timeout = Time::HiRes::time() + esc_wait_delay;
-  }
-
-  for (;;) {
-    select: {
-      case: $input_comm->pending() and do {
-        my $ev = $input_comm->dequeue();
-        if ($esc_wait_timer) {
-          $esc_wait_timer = FALSE;
-        }
-
-        if ($ev->{err}) {
-          return Event{Type => EventError, Err => $ev->{err}};
-        }
-
-        $inbuf .= $ev->{data} // '';
-        $status = extract_event(\$inbuf, $event, TRUE);
-        if ($event->{N} != 0) {
-          $inbuf = bytes::substr($inbuf, $event->{N});
-        }
-        if ($status == event_extracted) {
-          return $event;
-        } elsif ($status == esc_wait) {
-          $esc_wait_timer = TRUE;
-          $esc_timeout = Time::HiRes::time() + esc_wait_delay;
-        }
-      };
-      case: ($esc_wait_timer && Time::HiRes::time() > $esc_timeout) and do {
-        $esc_wait_timer = FALSE;
-        $status = extract_event(\$inbuf, $event, FALSE);
-        if ($event->{N} != 0) {
-          $inbuf = bytes::substr($inbuf, $event->{N});
-        }
-        if ($status == event_extracted) {
-          return $event
-        }
-      };
-      case: $interrupt_comm->dequeue_nb() and do {
-        $event->{Type} = EventInterrupt;
-        return $event;
-      };
-      case: $sigwinch->dequeue_nb() and do {
-        $event->{Type} = EventResize;
-        ($event->{Width}, $event->{Height}) = get_term_size($outfd);
-        return $event;
-      };
-    }
-  }
+  goto &Termbox::Go::Terminal::PollEvent;
 }
 
 # Returns the size of the internal back buffer (which is mostly the same as
@@ -737,29 +733,12 @@ sub PollEvent { # \%Event ()
 # of the terminal window, after the terminal size has changed, the internal back
 # buffer will get in sync only after L</Clear> or L</Flush> function calls.
 sub Size { # $x, $y ()
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : 0;
-
-  return ($termw, $termh);
+  goto &Termbox::Go::Terminal::Size;
 }
 
 # Clears the internal back buffer.
 sub Clear { # $errno ($fg, $bg)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($fg, $bg) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 2                    ? EINVAL
-        : @_ > 2                    ? E2BIG
-        : !defined(_NONNEGINT($fg)) ? EINVAL
-        : !defined(_NONNEGINT($bg)) ? EINVAL
-        : undef
-        ;
-
-  ($foreground, $background) = ($fg, $bg);
-  my $err = update_size_maybe() ? 0 : $!+0;
-  $back_buffer->clear();
-  return $err;
+  goto &Termbox::Go::Terminal::Clear;
 }
 
 # Sets termbox input mode. Termbox has two input modes:
@@ -776,31 +755,7 @@ sub Clear { # $errno ($fg, $bg)
 # If I<$mode> is 'InputCurrent', returns the current input mode. See also 
 # 'Input*' constants.
 sub SetInputMode { # $current ($mode)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($mode) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 1                      ? EINVAL
-        : @_ > 1                      ? E2BIG
-        : !defined(_NONNEGINT($mode)) ? EINVAL
-        : undef
-        ;
-
-  if ($mode == InputCurrent) {
-    return $input_mode;
-  }
-  if (($mode & (InputEsc | InputAlt)) == 0) {
-    $mode |= InputEsc;
-  }
-  if (($mode & (InputEsc | InputAlt)) == (InputEsc | InputAlt)) {
-    $mode &= ~InputAlt;
-  }
-  if ($mode & InputMouse) {
-    syswrite($out, $funcs->[t_enter_mouse]);
-  } else {
-    syswrite($out, $funcs->[t_exit_mouse]);
-  }
-
-  return $input_mode = $mode;
+  goto &Termbox::Go::Terminal::SetInputMode;
 }
 
 # Sets the termbox output mode. Termbox has four output options:
@@ -843,34 +798,15 @@ sub SetInputMode { # $current ($mode)
 # Note that this may return a different OutputMode than the one requested,
 # as the requested mode may not be available on the target platform.
 sub SetOutputMode { # $current ($mode)
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  my ($mode) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 1                      ? EINVAL
-        : @_ > 1                      ? E2BIG
-        : !defined(_NONNEGINT($mode)) ? EINVAL
-        : undef
-        ;
-
-  return $output_mode = $mode;
+  goto &Termbox::Go::Terminal::SetOutputMode;
 }
 
 # Sync comes handy when something causes desync between termbox's understanding
 # of a terminal buffer and the reality. Such as a third party process. Sync
 # forces a complete resync between the termbox and a terminal, it may not be
-# visually pretty though. 
+# visually pretty though.
 sub Sync { # $errno ()
-  my $class = shift if _INVOCANT($_[0]) and $_[0]->can(__FUNCTION__);
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $! = @_ ? E2BIG : 0;
-
-  $front_buffer->clear();
-  my $err = send_clear() ? 0 : $!+0;
-  if ($err != 0) {
-    return $err;
-  }
-
-  return Flush();
+  goto &Termbox::Go::Terminal::Sync;
 }
 
 1;
@@ -879,16 +815,19 @@ __END__
 
 =head1 NAME
 
-Termbox::Go::Terminal - Terminal Termbox implementation
+Termbox::Go::WinVT - Windows Terminal Termbox implementation
 
 =head1 DESCRIPTION
 
-This document describes the Termbox library for Perl, for the use of *nix 
-terminal applications.
+This document describes the Termbox library for Perl, using the Windows 
+Terminal, which was introduced with Windows 10. 
 
 The advantage of the Termbox library is the use of an standard. Termbox
 contains a few functions with which terminal applications can be 
 developed with high portability and interoperability. 
+
+B<Note>: Windows Terminal still requires parts of the classic Console API, 
+e.g. to set the input or output mode and codepage.
 
 =head1 COPYRIGHT AND LICENCE
 
@@ -933,7 +872,11 @@ L<5.014|http://metacpan.org/release/DAPM/perl-5.14.4>
 
 L<Params::Util> 
 
-L<Unicode::EastAsianWidth>
+L<Win32API::File> 
+
+L<Win32::Console> 
+
+L<Win32::API> 
 
 =head1 SEE ALSO
 
@@ -1176,6 +1119,15 @@ Sync comes handy when something causes desync between termbox's understanding
 of a terminal buffer and the reality. Such as a third party process. Sync
 forces a complete resync between the termbox and a terminal, it may not be
 visually pretty though.
+
+
+=head2 get_term_size
+
+ my ($cols, $rows) = get_term_size($fd);
+
+The call to Term::ReadKey::GetTerminalSize did not work if the handle was
+redirected or duplicated, so we need to mock the original
+Terminal::Backend::get_term_size() subroutine.
 
 
 

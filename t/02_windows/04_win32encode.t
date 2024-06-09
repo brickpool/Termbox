@@ -1,8 +1,14 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 7;
-plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
+use Test::More;
+
+if ($^O ne 'MSWin32') {
+  plan skip_all => 'Windows OS required for testing';
+}
+else {
+  plan tests => 7;
+}
 
 use Devel::Peek;
 use Devel::StrictMode;

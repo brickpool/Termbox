@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_');
-our $VERSION = version->declare('v0.2.0_0');
+our $VERSION = version->declare('v0.3.0_0');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -77,7 +77,7 @@ my %module = (
   MSWin32         => 'Win32',
 );
 # https://stackoverflow.com/a/72575526
-# $module{MSWin32} = 'WinVT' if $ENV{WT_SESSION};
+$module{MSWin32} = 'WinVT' if $ENV{WT_SESSION};
 
 my $module = $module{$OSNAME} || 'Terminal';
 

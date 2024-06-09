@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.2.0_0');
+our $VERSION = version->declare('v0.3.0_0');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -49,7 +49,6 @@ use threads::shared;
 use Thread::Queue;
 
 use Termbox::Go::Devel qw(
-  __CALLER__
   __FUNCTION__
   usage
 );

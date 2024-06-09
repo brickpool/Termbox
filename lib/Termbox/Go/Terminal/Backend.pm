@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.2.0_0');
+our $VERSION = version->declare('v0.3.0_0');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -35,6 +35,7 @@ our $AUTHORITY = 'github:brickpool';
 
 require bytes; # not use, see https://perldoc.perl.org/bytes
 use Carp qw( croak );
+use Devel::StrictMode;
 use Encode;
 use English qw( -no_match_vars );
 use IO::File;
@@ -578,7 +579,7 @@ sub get_term_size { # $cols, $rows ($fd)
 
 sub send_attr { # void ($fg, $bg)
   my ($fg, $bg) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
+  croak(usage("$!", __FILE__, __FUNCTION__)) if STRICT and
     $!  = @_ < 2                    ? EINVAL
         : @_ > 2                    ? E2BIG
         : !defined(_NONNEGINT($fg)) ? EINVAL
@@ -686,7 +687,7 @@ sub send_attr { # void ($fg, $bg)
 
 sub send_char { # void ($x, $y, $ch)
   my ($x, $y, $ch) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
+  croak(usage("$!", __FILE__, __FUNCTION__)) if STRICT and
     $!  = @_ < 3                    ? EINVAL
         : @_ > 3                    ? E2BIG
         : !defined(_NONNEGINT($x))  ? EINVAL
@@ -1098,6 +1099,12 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
   # the only possible option is utf8
   if (my $n = utf8::upgrade($inbuf0)) {
     $event->{Ch} = ord($inbuf0);
+    if ($event->{Ch} >= 0x80 && $event->{Ch} <= 0xff) {
+      # Note that characters from 128 to 255 (inclusive) are by 
+      # default internally not encoded as UTF-8 for backward 
+      # compatibility reasons.
+      $event->{Ch} = ord(Encode::decode(cp437 => $inbuf0));
+    }
     $event->{Key} = 0;
     $event->{N} = $n;
     return event_extracted;
