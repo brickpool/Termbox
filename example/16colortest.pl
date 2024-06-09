@@ -1,6 +1,5 @@
 #!perl
 use 5.014;
-use strict;
 use warnings;
 
 use Getopt::Long qw( GetOptions );
@@ -84,7 +83,7 @@ __END__
 
 =head1 NAME
 
-random_output.pl - an app that demonstrate 16 colors on console/tty.
+16colortest.pl - an app that demonstrate 16 colors on console/tty.
 
 =head1 SYNOPSIS
 

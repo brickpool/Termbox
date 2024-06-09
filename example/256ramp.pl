@@ -1,6 +1,5 @@
 #!perl
 use 5.014;
-use strict;
 use warnings;
 
 use Getopt::Long qw( GetOptions );
@@ -50,7 +49,7 @@ __END__
 
 =head1 NAME
 
-256ramp.pl - an app that prints many colors on console/tty.
+256ramp.pl - sample script that prints many colors on console/tty.
 
 =head1 SYNOPSIS
 
@@ -63,6 +62,8 @@ Exit by pressing any key.
 This gives a table of the 256-color-set,
 both the foreground and background variants.
 It is ordered to produce many color ramps.
+
+This is a Termbox::Go example script, see L<Termbox::Go> for details.
 
 =head1 OPTIONS
 

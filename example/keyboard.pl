@@ -1,14 +1,13 @@
 #!perl
 use 5.014;
-use strict;
 use warnings;
 
 use Getopt::Long qw( GetOptions );
 use Pod::Usage;
+use Unicode::EastAsianWidth::Detect qw( is_cjk_lang );
 
 use lib '../lib', 'lib';
 use Termbox::Go;
-use Unicode::EastAsianWidth::Detect qw( is_cjk_lang );
 
 use constant {
   K_ESC => [
@@ -1010,7 +1009,7 @@ __END__
 
 =head1 NAME
 
-keyboard.pl - an app that prints the keyboard layout on console/tty.
+keyboard.pl - sample script that prints the keyboard layout on console/tty.
 
 =head1 SYNOPSIS
 

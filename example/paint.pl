@@ -1,6 +1,5 @@
 #!perl
 use 5.014;
-use strict;
 use warnings;
 
 use Getopt::Long qw( GetOptions );
@@ -139,7 +138,7 @@ __END__
 
 =head1 NAME
 
-paint.pl - an demo app for the Termbox::Go module!
+paint.pl - sample script for the Termbox::Go module!
 
 =head1 SYNOPSIS
 

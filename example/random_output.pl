@@ -1,6 +1,5 @@
 #!perl
 use 5.014;
-use strict;
 use warnings;
 
 use Getopt::Long qw( GetOptions );
@@ -73,7 +72,7 @@ __END__
 
 =head1 NAME
 
-random_output.pl - an app that usually prints random colors on console/tty.
+random_output.pl - sample script that prints random colors on console/tty.
 
 =head1 SYNOPSIS
 

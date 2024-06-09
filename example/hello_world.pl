@@ -1,20 +1,13 @@
 #!perl
 use 5.014;
-use strict;
 use warnings;
 
 use Getopt::Long qw( GetOptions );
 use Pod::Usage;
-use utf8;
 
 use lib '../lib', 'lib';
 use Termbox::Go;
 use Termbox::Go::WCWidth qw( wcswidth );
-
-INIT {
-  use if $^O eq 'MSWin32', 'Termbox::Go::Win32::Backend', qw( $is_cjk );
-  our $is_cjk = 1;
-}
 
 sub main { # $ ()
   my $err = termbox::Init();
@@ -25,7 +18,6 @@ sub main { # $ ()
   }
 
   tbprint(2, 2, termbox::ColorRed, termbox::ColorDefault, "Hello terminal!");
-  tbprint(2, 3, termbox::ColorRed, termbox::ColorDefault, "こんにちは世界!");
   termbox::Flush();
 
   sleep(1);
@@ -33,13 +25,14 @@ sub main { # $ ()
   return 0;
 }
 
-# This function is often useful
+# This function is often useful.
 sub tbprint { # void ($x, $y, $fg, $bg, $msg)
   my ($x, $y, $fg, $bg, $msg) = @_;
   for my $c (split //, $msg) {
     termbox::SetCell($x, $y, $c, $fg, $bg);
     $x += wcswidth($c);
   }
+  return;
 }
 
 exit do {
@@ -53,7 +46,7 @@ __END__
 
 =head1 NAME
 
-hello_world.pl - an app that usually prints "Hello terminal!"
+hello_world.pl - sample script that usually prints "Hello terminal!"
 
 =head1 SYNOPSIS
 
