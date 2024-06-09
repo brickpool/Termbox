@@ -1,15 +1,10 @@
 use 5.014;
 use warnings;
 
-use Test::More;
+use Test::More tests => 15;
 use Test::Exception;
 
-if ($^O ne 'MSWin32') {
-  plan skip_all => 'Windows OS required for testing';
-}
-else {
-  plan tests => 15;
-}
+plan skip_all => "Windows OS required for testing" unless $^O eq 'MSWin32';
 
 use Data::Dumper;
 use Devel::StrictMode;
