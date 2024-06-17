@@ -51,7 +51,7 @@ sub voffset_coffset { # $voffset, $coffset ($text, $boffset)
     $coffset += 1;
     $voffset += rune_advance_len($r, $voffset);
   }
-  return ($coffset, $voffset);
+  return ($voffset, $coffset);
 }
 
 sub byte_slice_grow { # $octets ($s, $desired_cap)
@@ -387,7 +387,7 @@ mainloop:
             last;
           };
           case: $_ == termbox::KeyTab and do {
-            $edit_box->InsertRune('\t');
+            $edit_box->InsertRune("\t");
             last;
           };
           case: $_ == termbox::KeySpace and do {

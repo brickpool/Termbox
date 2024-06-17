@@ -1,5 +1,10 @@
 Revision history for Termbox::Go
 
+0.003_001
+        2024-06-17
+        - Encapsulation of the Win32::API imports
+        - fix Terminal Unicode support
+
 0.003   2024-06-06
         - Add Windows VT support
         - bug fixes

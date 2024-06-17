@@ -21,7 +21,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.0_0');
+our $VERSION = version->declare('v0.3.1');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -32,16 +32,19 @@ our $AUTHORITY = 'github:brickpool';
 # ------------------------------------------------------------------------
 
 use Carp qw( croak );
+use Config;
+use Devel::StrictMode;
 use Fcntl;
-use Params::Util qw( 
+use Params::Util qw(
+  _POSINT
   _NONNEGINT
+  _SCALAR0
   _INVOCANT
 );
 use POSIX qw( :errno_h );
 use threads;
 use threads::shared;
 use Thread::Queue 3.07;
-use Win32::API;
 use Win32::Console;
 use Win32API::File qw(
   :Misc
@@ -57,7 +60,6 @@ use Termbox::Go::Common qw(
   :vars
 );
 use Termbox::Go::Devel qw(
-  :all
   __FUNCTION__
   usage
 );
@@ -151,21 +153,44 @@ our %EXPORT_TAGS = (
 }
 
 # ------------------------------------------------------------------------
+# Types ------------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+# PeekConsoleInputW, ReadConsoleInputW
+use constant PTR_SIZE => $Config{ptrsize};
+
+# https://stackoverflow.com/a/35259129
+use constant UINT_PTR =>
+    PTR_SIZE == 8 ? 'Q'
+  : PTR_SIZE == 4 ? 'L'
+  : die("Unrecognized ptrsize\n");
+
+# ------------------------------------------------------------------------
 # Constants --------------------------------------------------------------
 # ------------------------------------------------------------------------
 
 # Windows Error Codes
 use constant {
+  ERROR_INVALID_HANDLE => 0x6,
+  ERROR_INVALID_DATA => 0xd,
+  ERROR_BAD_ARGUMENTS => 0xa0,
+  ERROR_INVALID_PARAMETER => 0x57,
+  ERROR_BAD_FILE_TYPE => 0xde,
+  WSAEFAULT => 0x271e,
+  WSAEINVAL => 0x2726,
   WSAEWOULDBLOCK => 0x2733,
 };
 
 # Windows INPUT_RECORD EventType
 use constant {
-  KEY_EVENT   => 0x0001,
+  KEY_EVENT => 0x0001,
   MOUSE_EVENT => 0x0002,
+  WINDOW_BUFFER_SIZE_EVENT => 0x0004,
+  MENU_EVENT => 0x0008,
+  FOCUS_EVENT => 0x0010,
 };
 
-# Input mode flags
+# Windows Input mode flags
 use constant {
   ENABLE_INSERT_MODE => 0x0020,
   ENABLE_QUICK_EDIT_MODE => 0x0040,
@@ -173,7 +198,7 @@ use constant {
   ENABLE_EXTENDED_FLAGS => 0x0080,
 };
 
-# Output mode flags
+# Windows Output mode flags
 use constant {
   ENABLE_VIRTUAL_TERMINAL_PROCESSING => 0x0004,
   DISABLE_NEWLINE_AUTO_RETURN => 0x0008,
@@ -181,20 +206,33 @@ use constant {
 };
 
 # Windows codepage's
+# https://learn.microsoft.com/en-us/windows/win32/intl/code-page-identifiers
 use constant {
   CP_UTF8 => 65001,
 };
 
-# Windows read console index
+# Windows PeekConsoleInput/ReadConsoleInput
 use constant {
-  _event_type   => 0,
-  _key_down     => 1,
-  _repeat_count => 2,
-  _ascii_char   => 5,
+  # INPUT_RECORD
+  wEventType        => 0,
+  # KEY_EVENT_RECORD
+  bKeyDown          => 1,
+  wRepeatCount      => 2,
+  wVirtualKeyCode   => 3,
+  wVirtualScanCode  => 4,
+  UnicodeChar       => 5,
+  AsciiChar         => 5,
+  dwControlKeyState => 6,
 };
 
+# Windows Virtual-Key Codes
 use constant {
-  kernel32 => "kernel32.dll",
+  VK_SHIFT => 0x10,   # SHIFT key
+  VK_CONTROL => 0x11, # CTRL key
+  VK_MENU => 0x12,    # ALT key
+  VK_CAPITAL => 0x14, # CAPS LOCK key
+  VK_NUMLOCK => 0x90, # NUM LOCK key
+  VK_SCROLL => 0x91,  # SCROLL LOCK key
 };
 
 # ------------------------------------------------------------------------
@@ -212,15 +250,223 @@ my $orig_cp_out;
 # SysCalls ---------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-my $peek_named_pipe;
+# Win32::Console only provides the ANSI versions
+package syscall {
+use Win32::API;
+use constant kernel32 => "kernel32.dll";
 BEGIN {
-  $peek_named_pipe = Win32::API->new(kernel32,
-    'PeekNamedPipe', 'NPIPPP', 'N'
+  exists &PeekConsoleInputW 
+    or
+  Win32::API::More->Import(kernel32,
+    'BOOL WINAPI PeekConsoleInputW(
+      HANDLE    hConsoleInput,
+      UINT_PTR  lpBuffer,
+      DWORD     nLength,
+      LPDWORD   lpNumberOfEventsRead
+    )'
+  ) or die "Import PeekConsoleInputW: $^E";
+
+  exists &PeekNamedPipe 
+    or
+  Win32::API::More->Import(kernel32,
+    'BOOL PeekNamedPipe(
+      HANDLE  hNamedPipe,
+      LPVOID  lpBuffer,
+      DWORD   nBufferSize,
+      LPDWORD lpBytesRead,
+      LPDWORD lpTotalBytesAvail,
+      LPDWORD lpBytesLeftThisMessage
+    )'
   ) or die "Import PeekNamedPipe: $^E";
+
+  exists &ReadConsoleInputW 
+    or
+  Win32::API::More->Import(kernel32,
+    'BOOL WINAPI ReadConsoleInputW(
+      HANDLE    hConsoleInput,
+      UINT_PTR  lpBuffer,
+      DWORD     nLength,
+      LPDWORD   lpNumberOfEventsRead
+    )'
+  ) or die "Import ReadConsoleInputW: $^E";
+}
+1;
+}
+
+my $proc_peek_console_input = \&syscall::PeekConsoleInputW;
+my $proc_peek_named_pipe    = \&syscall::PeekNamedPipe;
+my $proc_read_console_input = \&syscall::ReadConsoleInputW;
+
+# ------------------------------------------------------------------------
+
+# Reads the current event type from the specified console input buffer without 
+# removing an event from the buffer (or undef on errors).
+sub peek_console_input { # @events ($hConsoleInput)
+  my ($h) = @_;
+  (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
+    $^E = @_ != 1       ? ERROR_BAD_ARGUMENTS
+        : !_POSINT($h)  ? ERROR_INVALID_HANDLE
+        : 0
+        ;
+
+  my $err;
+  my $record = pack('L5', (0) x 5);
+  my $readRecords = 0;
+  my @events = ();
+  my $r0 = do {
+    my $uintptr = unpack(UINT_PTR, pack('P', $record));
+    my $result = $proc_peek_console_input->($h, $uintptr, 1, $readRecords);
+    $result;
+  };
+  my $e1 = $^E + 0;
+  if ($r0) {
+    if ($readRecords) {
+      push @events, unpack('L', $record);
+      switch: for ($events[0]) {
+        case: $_ == KEY_EVENT and do {
+          @events = unpack('LLSSSSL', $record);
+          last;
+        };
+        case: $_ == MOUSE_EVENT and do {
+          @events = unpack('LLLLL', $record);
+          last;
+        };
+        case: $_ == WINDOW_BUFFER_SIZE_EVENT || 
+              $_ == MENU_EVENT || 
+              $_ == FOCUS_EVENT 
+        and do {
+          @events = unpack('LL', $record);
+          last;
+        };
+      }
+    }
+  } else {
+    if ($e1) {
+      $err = $e1;
+    } else {
+      $err = $^E = WSAEINVAL;
+    }
+  }
+  $err ? return : @events;
+}
+
+# Returns information about data in the pipe. The parameter can be a handle to 
+# a named pipe instance, as returned by the CreateNamedPipe or CreateFile 
+# function. The handle must have GENERIC_READ access. 
+# Further details:: https://stackoverflow.com/a/73571717
+sub peek_named_pipe { # $nTotalBytesAvail ($hNamedPipe)
+  # TRACE_VOID();
+  my ($h) = @_;
+  (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
+    $^E = @_ != 1       ? ERROR_BAD_ARGUMENTS
+        : !_POSINT($h)  ? ERROR_INVALID_HANDLE
+        : 0
+        ;
+
+  my $err;
+  my $available;
+  my $r0 = $proc_peek_named_pipe->($h, undef, 0, undef, $available, undef);
+  my $e1 = $^E + 0;
+  if (!$r0) {
+    if ($e1) {
+      $err = $e1;
+    } else {
+      $err = $^E = WSAEINVAL;
+    }
+  }
+  # SHOW_CODE($available // 0);
+  $err ? return : $available;
+}
+
+# Reads data from a console input buffer and removes it from the buffer. 
+# Returns a list of values, which depending on the event's type.
+#
+# Information about a keyboard event:
+#
+# - wEventType: KEY_EVENT = 0x0001
+# - bKeyDown: If the key is pressed, this member is TRUE. Otherwise FALSE.
+# - wRepeatCount: The repeat count (indicates that a key is being held down). 
+# - wVirtualKeyCode: A virtual-key code that identifies the given key.
+# - wVirtualScanCode: The virtual scan code of the given key.
+# - uChar: Translated Unicode character
+# - dwControlKeyState: The state of the control keys
+#
+# Information about a mouse movement or button press event:
+#
+# - wEventType:  MOUSE_EVENT = 0x0002
+# - dwMousePosition: A COORD structure that contains the location of the cursor
+# - dwButtonState: The status of the mouse buttons.
+# - dwControlKeyState: The state of the control keys.
+# - dwEventFlags: The type of mouse event.
+#
+# Information about the new size of the console screen buffer:
+#
+# - wEventType: WINDOW_BUFFER_SIZE_EVENT = 0x0004
+# - dwSize: A COORD structure that contains the size of the console.
+#
+# Used internally and should be ignored:
+#
+# - wEventType: MENU_EVENT = 0x0008
+# - dwCommandId: Reserved.
+#
+# Used internally and should be ignored:
+#
+# - wEventType: FOCUS_EVENT = 0x0010
+# - bSetFocus: Reserved.
+#
+sub read_console_input { # @events ($hConsoleInput)
+  # TRACE_VOID();
+  my ($h) = @_;
+  (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
+    $^E = @_ != 1       ? ERROR_BAD_ARGUMENTS
+        : !_POSINT($h)  ? ERROR_INVALID_HANDLE
+        : 0
+        ;
+
+  my $err;
+  my $record = pack('L5', (0) x 5);
+  my $readRecords = 0;
+  my @events = ();
+  my $r0 = do {
+    my $uintptr = unpack(UINT_PTR, pack('P', $record));
+    my $result = $proc_read_console_input->($h, $uintptr, 1, $readRecords);
+    $result;
+  };
+  my $e1 = $^E + 0;
+  if ($r0) {
+    if ($readRecords) {
+      push @events, unpack('L', $record);
+      switch: for ($events[0]) {
+        case: $_ == KEY_EVENT and do {
+          push @events, unpack('x4'.'LSSSSL', $record);
+          last;
+        };
+        case: $_ == MOUSE_EVENT and do {
+          push @events, unpack('x4'.'LLLL', $record);
+          last;
+        };
+        case: $_ == WINDOW_BUFFER_SIZE_EVENT || 
+              $_ == MENU_EVENT || 
+              $_ == FOCUS_EVENT 
+        and do {
+          push @events, unpack('x4'.'L', $record);
+          last;
+        };
+      }
+    }
+  } else {
+    if ($e1) {
+      $err = $e1;
+    } else {
+      $err = $^E = WSAEINVAL;
+    }
+  }
+  # SHOW_CODE($e1);
+  $err ? return : @events;
 }
 
 # ------------------------------------------------------------------------
-# Backend ----------------------------------------------------------------
+# Terminal::Backend ------------------------------------------------------
 # ------------------------------------------------------------------------
 
 # The call to Term::ReadKey::GetTerminalSize did not work if the handle was 
@@ -270,7 +516,7 @@ sub Init { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  TRACE_VOID();
+  # TRACE_VOID();
   if ($IsInit) {
     return 0;
   }
@@ -298,97 +544,53 @@ sub Init { # $errno ()
   $outfd = fileno($out);
 
   $notify = threads->create(sub {
-    TRACE_VOID();
-    # references
-    # https://metacpan.org/pod/Win32::PowerShell::IPC#PeekNamedPipe
-    # https://stackoverflow.com/a/73571717
+    # TRACE_VOID();
     local $SIG{'KILL'} = sub { threads->exit() };
     my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
-    if ($hInput == INVALID_HANDLE_VALUE) {
-      return SET_ERROR($!, EBADF, 'FdGetOsFHandle');
-    }
+    die($^E = ERROR_INVALID_HANDLE) if $hInput == INVALID_HANDLE_VALUE;
     my $hOutput = FdGetOsFHandle($outfd) // INVALID_HANDLE_VALUE;
-    if ($hOutput == INVALID_HANDLE_VALUE) {
-      return SET_ERROR($!, EBADF, 'FdGetOsFHandle');
-    }
+    die($^E = ERROR_INVALID_HANDLE) if $hOutput == INVALID_HANDLE_VALUE;
     my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
-    DEBUG_FMT('FileType: %d', $uFileType);
+    # DEBUG_FMT('FileType: %d', $uFileType);
     for (;;) {
       switch: for ($uFileType) {
         case: $_ == FILE_TYPE_CHAR and do {
-          local $_;
           # Get the number of unread input records in the input buffer of the 
           # console. This includes keyboard and mouse events, but also events
           # for resizing.
-          $^E = 0;
-          my $cNumberOfEvents
-            = Win32::Console::_GetNumberOfConsoleInputEvents($hInput);
-          if ($^E) {
-            return SET_FAIL($!, 'GetNumberOfConsoleInputEvents');
-          }
-          $cNumberOfEvents //= 0;
-          if ($cNumberOfEvents > 0) {
-            $^E = 0;
-            my ($eventType) = Win32::Console::_PeekConsoleInput($hInput);
-            if ($^E) {
-              return SET_FAIL($!, 'PeekConsoleInput');
-            }
-            $eventType //= 0;
-            switch: for ($eventType) {
+          if (Win32::Console::_GetNumberOfConsoleInputEvents($hInput)) {
+            # DEBUG('NumberOfEvents > 0') unless $sigio->pending();
+            my @events = peek_console_input($hInput);
+            die $^E if $^E;
+            switch: for ($events[0]) {
               case: $_ == KEY_EVENT and do {
-                DEBUG('KEY_EVENT') unless $sigio->pending();
+                # DEBUG('KEY_EVENT') unless $sigio->pending();
                 $sigio->pending() or $sigio->enqueue(TRUE);
                 last;
               };
-              case: $_ == MOUSE_EVENT and do {
-                DEBUG('MOUSE_EVENT');
+              case: $_ == WINDOW_BUFFER_SIZE_EVENT and do {
+                # DEBUG('WINDOW_BUFFER_SIZE_EVENT') unless $sigwinch->pending();
+                $sigwinch->pending() or $sigwinch->enqueue(TRUE);
                 last;
-              };
-              default: {
-                state $col = 0;
-                state $row = 0;
-                # Win32::Console::_PeekConsoleInput returns false if it is not 
-                # a keyboard or mouse event. Means we receive a event type 
-                # FOCUS_EVENT, MENU_EVENT or WINDOW_BUFFER_SIZE_EVENT.
-                $^E = 0;
-                my ($curr_col, $curr_row) 
-                  = Win32::Console::_GetConsoleScreenBufferInfo($hOutput);
-                if ($^E) {
-                  SET_FAIL($!, 'GetConsoleScreenBufferInfo');
-                }
-                $curr_col //= 0;
-                $curr_row //= 0;
-                if ($curr_col != $col || $curr_row != $row) {
-                  DEBUG('WINDOW_BUFFER_SIZE_EVENT') unless $sigwinch->pending();
-                  $sigwinch->pending() or $sigwinch->enqueue(TRUE);
-                  ($col, $row) = ($curr_col, $curr_row);
-                }
-              } # default
-            } # switch: for ($eventType)
-          } # if ($cNumberOfEvents)
+              }
+            }
+          }
           last;
-        };
-        case: $_ == FILE_TYPE_DISK ||
-              $_ == FILE_TYPE_PIPE and do {
-          my $bytesAvailable = 0;
-          # PeekNamedPipe(hInput, NULL, NULL, NULL, &bytesAvailable, NULL)
-          my $lpTotalBytesAvail = pack('L', 0);
-          $peek_named_pipe->Call($hInput, undef, 0, undef, $lpTotalBytesAvail, 
-            undef) or return;
-          $bytesAvailable = unpack('L', $lpTotalBytesAvail);
-          if ($bytesAvailable > 0) {
-            DEBUG('KEY_EVENT') unless $sigio->pending();
-            $sigwinch->pending() or $sigio->enqueue(TRUE);
+        }; # case: $_ == FILE_TYPE_CHAR
+        case: $_ == FILE_TYPE_DISK || $_ == FILE_TYPE_PIPE and do {
+          if (peek_named_pipe($hInput)) {
+            # DEBUG('TotalBytesAvail > 0') unless $sigio->pending();
+            $sigio->pending() or $sigio->enqueue(TRUE);
           }
           last;
         };
         default: {
-          return SET_FAIL($!, 'unknown FileType');
+          die $^E = ERROR_BAD_FILE_TYPE;
         }
       }
       # Wait 20 millis for more data
       Time::HiRes::sleep(20/1000);
-    }
+    } # for (;;)
   });
   $notify->detach();
 
@@ -449,14 +651,14 @@ sub Init { # $errno ()
     };
   }
 
-  # Set codepage to utf8
+  # Set output codepage to utf8
   {
     $^E = 0;
     $orig_cp_out = Win32::Console::_GetConsoleOutputCP();
     if ($^E) {
       return $! = ENXIO;
     }
-    if (!Win32::Console::_SetConsoleOutputCP(65001)) {
+    if (!Win32::Console::_SetConsoleOutputCP(CP_UTF8)) {
       return $! = ENXIO;
     }
   }
@@ -490,31 +692,55 @@ sub Init { # $errno ()
   # $front_buffer->clear();
 
   threads->create(sub {
-    TRACE_VOID();
-    use bytes;
+    # TRACE_VOID();
     my $buf = "\0" x 128;
     my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
-    if ($hInput == INVALID_HANDLE_VALUE) {
-      return SET_ERROR($!, EBADF, 'FdGetOsFHandle');
-    }
+    die($^E = ERROR_INVALID_HANDLE) if $hInput == INVALID_HANDLE_VALUE;
     my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
     for (;;) {
       select: {
         case: $sigio->dequeue_nb() and do {
-          DEBUG('sigio dequeued');
+          # DEBUG('sigio dequeued');
           for (;;) {
             my $n = 0;
             $^E = 0;
             switch: for ($uFileType) {
               case: $_ == FILE_TYPE_CHAR and do {
+                # There is no possibility to call ReadFile asynchronously (the 
+                # OVERLAPPED flag is not used for the $CONIN, see CreateFile).
+                # ReadConsole cannot be used asynchronously.
+                # Therefore ReadConsoleInput is used (see also PDCusres 
+                # or .NET System.Console).
                 my $cNumberOfEvents 
-                  = Win32::Console::_GetNumberOfConsoleInputEvents($hInput) // 0;
-                while ($cNumberOfEvents--) {
-                  if (my @ir = Win32::Console::_ReadConsoleInput($hInput)) {
-                    if ($ir[_event_type] == KEY_EVENT && $ir[_key_down]) {
-                      while ($ir[_repeat_count]--) {
-                        substr($buf, $n++, 1) = chr($ir[_ascii_char]);
-                      }
+                  = Win32::Console::_GetNumberOfConsoleInputEvents($hInput) 
+                  // 0;
+                process_event: while ($cNumberOfEvents--) {
+                  if (my @ir = read_console_input($hInput)) {
+                    switch: for ($ir[wEventType]) {
+                      case: $_ == KEY_EVENT and do {
+                        # throw away KeyUp events
+                        next process_event unless $ir[bKeyDown];
+                        # throw away shift/alt/ctrl key only key events
+                        next process_event 
+                            if $ir[wVirtualKeyCode] == VK_SHIFT
+                            || $ir[wVirtualKeyCode] == VK_CONTROL
+                            || $ir[wVirtualKeyCode] == VK_MENU
+                            || $ir[wVirtualKeyCode] == VK_CAPITAL
+                            || $ir[wVirtualKeyCode] == VK_NUMLOCK
+                            || $ir[wVirtualKeyCode] == VK_SCROLL;
+                        while ($ir[wRepeatCount]--) {
+                          my $ch = chr($ir[UnicodeChar]);
+                          my $w = bytes::length($ch);
+                          # DEBUG_FMT('codepoint: %#x, bytes: %d, char: %s', $ir[UnicodeChar], $w, $ch);
+                          # There is a small hidden flaw here. If the number 
+                          # of same characters is too high, these characters 
+                          # are discarded now.
+                          last process_event if $n + $w > 128;
+                          bytes::substr($buf, $n, $w, $ch);
+                          $n += $w;
+                        }
+                        last;
+                      };
                     }
                   }
                 }
@@ -524,37 +750,44 @@ sub Init { # $errno ()
                 last;
               };
               case: $_ == FILE_TYPE_DISK || $_ == FILE_TYPE_PIPE and do {
-                return SET_FAIL($!, 'not implemented');
+                if (peek_named_pipe($hInput)) {
+                  $n = POSIX::read($hInput, $buf, 128) 
+                    // do { $^E ||= WSAEFAULT; 0 };
+                }
+                if ($n == 0) {
+                  $^E ||= WSAEWOULDBLOCK;
+                }
+                last;
               };
               default: {
-                return SET_FAIL($!, 'unknown FileType');
+                die $^E = ERROR_BAD_FILE_TYPE;
               }
-            }
-            DEBUG_FMT("read %d bytes", $n) if $n;
+            } # switch: for ($uFileType)
+            # DEBUG_FMT("read %d bytes", $n) if $n;
             my $err = $^E+0;
-            if ($err) {
-              DEBUG_FMT("System Error Code: %d", $err) if $err;
+            if ($err == WSAEWOULDBLOCK) {
               last;
             }
             select: {
               my $ie;
-              case: ($ie = input_event(substr($buf, 0, $n), $err)) and do {
-                DEBUG_FMT('enqueue {%s} to input_comm', "@{[%$ie]}");
+              case: ($ie = input_event(bytes::substr($buf, 0, $n), $err)) and do {
+                # DEBUG_FMT('enqueue {%s} to input_comm', "@{[%$ie]}");
                 $input_comm->enqueue($ie);
-                DEBUG('done');
-                substr($buf, $n, 128) = "\0" x 128;
+                bytes::substr($buf, $n, (128-$n), "\0" x (128-$n));
               };
               case: $quit->dequeue_nb() and do {
-                return 0+RETURN_OK;
+                # RETURN_OK;
+                return 0;
               };
             }
-          }
-        };
+          } # for (;;)
+        }; # case: $sigio->dequeue_nb()
         case: $quit->dequeue_nb() and do {
-          return 0+RETURN_OK;
+          # RETURN_OK;
+          return 0;
         };
       }
-    }
+    } # for (;;)
   })->detach();
 
   $IsInit = TRUE;
@@ -575,7 +808,7 @@ sub Close { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  TRACE_VOID();
+  # TRACE_VOID();
   if (!$IsInit) {
     return $! = EBADF;
   }
@@ -885,6 +1118,8 @@ L<Go termbox implementation|http://godoc.org/github.com/nsf/termbox-go>
 =cut
 
 
+
+
 #################### pod generated by Pod::Autopod - keep this line to make pod updates possible ####################
 
 =head1 SUBROUTINES
@@ -1128,6 +1363,130 @@ visually pretty though.
 The call to Term::ReadKey::GetTerminalSize did not work if the handle was
 redirected or duplicated, so we need to mock the original
 Terminal::Backend::get_term_size() subroutine.
+
+
+=head2 peek_console_input
+
+ my @events = peek_console_input($hConsoleInput);
+
+Reads the current event type from the specified console input buffer without
+removing an event from the buffer (or undef on errors).
+
+
+=head2 peek_named_pipe
+
+ my $nTotalBytesAvail = peek_named_pipe($hNamedPipe);
+
+Returns information about data in the pipe. The parameter can be a handle to
+a named pipe instance, as returned by the CreateNamedPipe or CreateFile
+function. The handle must have GENERIC_READ access.
+Further details:: https://stackoverflow.com/a/73571717
+
+
+=head2 read_console_input
+
+ my @events = read_console_input($hConsoleInput);
+
+Reads data from a console input buffer and removes it from the buffer.
+Returns a list of values, which depending on the event's type.
+
+Information about a keyboard event:
+
+=over
+
+=item *
+wEventType: KEY_EVENT = 0x0001
+
+
+=item *
+bKeyDown: If the key is pressed, this member is TRUE. Otherwise FALSE.
+
+
+=item *
+wRepeatCount: The repeat count (indicates that a key is being held down).
+
+
+=item *
+wVirtualKeyCode: A virtual-key code that identifies the given key.
+
+
+=item *
+wVirtualScanCode: The virtual scan code of the given key.
+
+
+=item *
+uChar: Translated Unicode character
+
+
+=item *
+dwControlKeyState: The state of the control keys
+
+=back
+
+Information about a mouse movement or button press event:
+
+=over
+
+=item *
+wEventType:  MOUSE_EVENT = 0x0002
+
+
+=item *
+dwMousePosition: A COORD structure that contains the location of the cursor
+
+
+=item *
+dwButtonState: The status of the mouse buttons.
+
+
+=item *
+dwControlKeyState: The state of the control keys.
+
+
+=item *
+dwEventFlags: The type of mouse event.
+
+=back
+
+Information about the new size of the console screen buffer:
+
+=over
+
+=item *
+wEventType: WINDOW_BUFFER_SIZE_EVENT = 0x0004
+
+
+=item *
+dwSize: A COORD structure that contains the size of the console.
+
+=back
+
+Used internally and should be ignored:
+
+=over
+
+=item *
+wEventType: MENU_EVENT = 0x0008
+
+
+=item *
+dwCommandId: Reserved.
+
+=back
+
+Used internally and should be ignored:
+
+=over
+
+=item *
+wEventType: FOCUS_EVENT = 0x0010
+
+
+=item *
+bSetFocus: Reserved.
+
+=back
+
 
 
 

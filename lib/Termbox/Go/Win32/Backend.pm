@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.0_0');
+our $VERSION = version->declare('v0.3.1');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -60,7 +60,6 @@ use Thread::Queue 3.07;
 use Unicode::EastAsianWidth;
 use Unicode::EastAsianWidth::Detect qw( is_cjk_lang );
 use Win32;
-use Win32::API;
 use Win32::Console;
 
 use Termbox::Go::Common qw( :all );
@@ -255,7 +254,7 @@ our %EXPORT_TAGS = (
 # Types ------------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-# WaitForMultipleObjects 
+# WaitForMultipleObjects, WriteConsoleOutputW
 use constant PTR_SIZE => $Config{ptrsize};
 
 use constant HANDLE =>
@@ -263,6 +262,7 @@ use constant HANDLE =>
   : PTR_SIZE == 4 ? 'L'
   : die("Unrecognized ptrsize\n");
 
+# https://stackoverflow.com/a/35259129
 use constant UINT_PTR =>
     PTR_SIZE == 8 ? 'Q'
   : PTR_SIZE == 4 ? 'L'
@@ -272,55 +272,6 @@ use constant {
   INFINITE    => 0xffffffff,
   WAIT_FAILED => 0xffffffff,
 };
-
-q/*
-Win32::API::Struct->typedef(
-  KEY_EVENT_RECORD => qw(
-    BOOL  bKeyDown;           # d0
-    WORD  wRepeatCount;       # w1
-    WORD  wVirtualKeyCode;    # w2
-    WORD  wVirtualScanCode;   # w3
-    WCHAR uChar;              # w4
-    DWORD dwControlKeyState;  # d5
-  );
-);
-
-Win32::API::Struct->typedef(
-  MOUSE_EVENT_RECORD => qw(
-    DWORD dwMousePosition;    # d0
-    DWORD dwButtonState;      # w1
-    DWORD dwControlKeyState;  # w3
-    DWORD dwEventFlags;       # d5
-  );
-);
-
-Win32::API::Struct->typedef(
-  WINDOW_BUFFER_SIZE_RECORD => qw(
-    DWORD dwSize;             # d0
-  );
-);
-*/ if 0;
-
-BEGIN {
-  Win32::API::Struct->typedef(
-    INPUT_RECORD => qw(
-      DWORD   EventType;
-      DWORD   d0;
-      WORD    w1;
-      WORD    w2;
-      WORD    w3;
-      WORD    w4;
-      DWORD   d5;
-    )
-  );
-
-  Win32::API::Struct->typedef(
-    CONSOLE_FONT_INFO => qw(
-      DWORD nFont;
-      DWORD dwFontSize;
-    )
-  );
-}
 
 # ------------------------------------------------------------------------
 
@@ -646,6 +597,33 @@ use constant {
   WINDOW_BUFFER_SIZE_EVENT  => 0x0004,
 };
 
+# ReadConsoleInput
+use constant {
+  # INPUT_RECORD
+  wEventType        => 0,
+  # KEY_EVENT_RECORD
+  bKeyDown          => 1,
+  wRepeatCount      => 2,
+  wVirtualKeyCode   => 3,
+  wVirtualScanCode  => 4,
+  UnicodeChar       => 5,
+  AsciiChar         => 5,
+  dwControlKeyState => 6,
+  # MOUSE_EVENT_RECORD
+  dwMousePosition   => 1,
+  dwButtonState     => 2,
+  dwControlKeyState => 3,
+  dwEventFlags      => 4,
+  # WINDOW_BUFFER_SIZE_RECORD
+  dwSize            => 1,
+};
+
+# GetCurrentConsoleFont
+use constant {
+  nFont       => 0,
+  dwFontSize  => 1,
+};
+
 # Character attributes
 use constant {
   COMMON_LVB_LEADING_BYTE   => 0x0100,
@@ -674,11 +652,6 @@ use constant {
              | FROM_LEFT_4TH_BUTTON_PRESSED,
   SM_CXMIN  => 28,
   SM_CYMIN  => 29,
-};
-
-use constant {
-  kernel32 => "kernel32.dll",
-  moduser32 => "user32.dll",
 };
 
 # api_windows.go
@@ -798,16 +771,23 @@ my $color_table_fg = [
 # SysCalls ---------------------------------------------------------------
 # ------------------------------------------------------------------------
 
+package syscall {
+use Win32::API;
+use constant kernel32 => "kernel32.dll";
 BEGIN {
+  exists &ReadConsoleInputW
+    or
   Win32::API::More->Import(kernel32,
     'BOOL ReadConsoleInputW(
-      HANDLE         hConsoleInput,
-      LPINPUT_RECORD lpBuffer,
-      DWORD          nLength,
-      LPDWORD        lpNumberOfEventsRead
+      HANDLE    hConsoleInput,
+      UINT_PTR  lpBuffer,
+      DWORD     nLength,
+      LPDWORD   lpNumberOfEventsRead
     )'
   ) or die "Import ReadConsoleInput: $^E";
 
+  exists &WaitForMultipleObjects
+    or
   Win32::API::More->Import(kernel32,
     'DWORD WaitForMultipleObjects(
       DWORD     nCount,
@@ -817,29 +797,37 @@ BEGIN {
     );'
   ) or die "Import WaitForMultipleObjects: $^E";
 
+  exists &CreateEventW
+    or
   Win32::API::More->Import(kernel32,
     'HANDLE CreateEventW(
-      LPVOID       lpEventAttributes,
-      BOOL         bManualReset,
-      BOOL         bInitialState,
-      LPCWSTR      lpName
+      LPVOID    lpEventAttributes,
+      BOOL      bManualReset,
+      BOOL      bInitialState,
+      LPCWSTR   lpName
     )'
   ) or die "Import CreateEventW: $^E";
 
+  exists &SetEvent
+    or
   Win32::API::More->Import(kernel32,
     'BOOL SetEvent(
       HANDLE hEvent
     )'
   ) or die "Import SetEvent: $^E";
 
+  exists &GetCurrentConsoleFont
+    or
   Win32::API::More->Import(kernel32,
     'BOOL GetCurrentConsoleFont(
-      HANDLE              hConsoleOutput,
-      BOOL                bMaximumWindow,
-      LPCONSOLE_FONT_INFO lpConsoleCurrentFont
+      HANDLE    hConsoleOutput,
+      BOOL      bMaximumWindow,
+      UINT_PTR  lpConsoleCurrentFont
     )'
   ) or die "Import GetCurrentConsoleFont: $^E";
 
+  exists &WriteConsoleOutputW
+    or
   Win32::API::More->Import(kernel32,
     'BOOL WriteConsoleOutputW(
       HANDLE    hConsoleOutput,
@@ -849,13 +837,8 @@ BEGIN {
       UINT_PTR  lpWriteRegion
     )'
   ) or die "Import WriteConsoleOutputW: $^E";
-
-  # Win32::API::More->Import(kernel32,
-  #   'DWORD GetConsoleFontSize(
-  #     HANDLE hConsoleOutput,
-  #     DWORD  nFont
-  #   )'
-  # ) or die "Import GetConsoleFontSize: $^E";
+}
+1;
 }
 
 my $proc_set_console_active_screen_buffer  = \&Win32::Console::_SetConsoleActiveScreenBuffer;
@@ -863,21 +846,21 @@ my $proc_set_console_screen_buffer_size    = \&Win32::Console::_SetConsoleScreen
 my $proc_set_console_window_info           = \&Win32::Console::_SetConsoleWindowInfo;
 my $proc_create_console_screen_buffer      = \&Win32::Console::_CreateConsoleScreenBuffer;
 my $proc_get_console_screen_buffer_info    = \&Win32::Console::_GetConsoleScreenBufferInfo;
-my $proc_write_console_output              = \&WriteConsoleOutputW;
+my $proc_write_console_output              = \&syscall::WriteConsoleOutputW;
 my $proc_write_console_output_character    = \&Win32::Console::_WriteConsoleOutputCharacter;
 my $proc_write_console_output_attribute    = \&Win32::Console::_WriteConsoleOutputAttribute;
 my $proc_set_console_cursor_info           = \&Win32::Console::_SetConsoleCursorInfo;
 my $proc_set_console_cursor_position       = \&Win32::Console::_SetConsoleCursorPosition;
 my $proc_get_console_cursor_info           = \&Win32::Console::_GetConsoleCursorInfo;
-my $proc_read_console_input                = \&ReadConsoleInputW;
+my $proc_read_console_input                = \&syscall::ReadConsoleInputW;
 my $proc_get_console_mode                  = \&Win32::Console::_GetConsoleMode;
 my $proc_set_console_mode                  = \&Win32::Console::_SetConsoleMode;
 my $proc_fill_console_output_character     = \&Win32::Console::_FillConsoleOutputCharacter;
 my $proc_fill_console_output_attribute     = \&Win32::Console::_FillConsoleOutputAttribute;
-my $proc_create_event                      = \&CreateEventW;
-my $proc_wait_for_multiple_objects         = \&WaitForMultipleObjects;
-my $proc_set_event                         = \&SetEvent;
-my $proc_get_current_console_font          = \&GetCurrentConsoleFont;
+my $proc_create_event                      = \&syscall::CreateEventW;
+my $proc_wait_for_multiple_objects         = \&syscall::WaitForMultipleObjects;
+my $proc_set_event                         = \&syscall::SetEvent;
+my $proc_get_current_console_font          = \&syscall::GetCurrentConsoleFont;
 my $get_system_metrics                     = \&Win32::GetSystemMetrics;
 
 # ------------------------------------------------------------------------
@@ -1208,44 +1191,42 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
 
   my $err;
   my $r0 = do { # proc_read_console_input
-    state $lpBuffer = do {
-      my $record = Win32::API::Struct->new('INPUT_RECORD');
-      map { $record->{$_} = 0 } qw( EventType d0 w1 w2 w3 w4 d5 );
-      $record;
-    };
-    my $r = $proc_read_console_input->($h, $lpBuffer, 1, $tmp_arg);
+    my $buf = pack('L5', (0) x 5);
+    my $uintptr = unpack(UINT_PTR, pack('P', $buf));
+    my $r = $proc_read_console_input->($h, $uintptr, 1, $tmp_arg);
     if ($r) {
-      $record->{event_type} = $lpBuffer->{EventType};
-      $lpBuffer->{EventType} = 0;
+      my @ev = unpack('L', $buf);
+      $record->{event_type} = unpack('L', $buf);
       switch: for ($record->{event_type}) {
-        case: key_event == $_ and do {
+        case: KEY_EVENT == $_ and do {
+          push @ev, unpack('x4'.'LSSSSL', $buf);
           $record->{event} = {
-            key_down          => $lpBuffer->{d0},
-            repeat_count      => $lpBuffer->{w1},
-            virtual_key_code  => $lpBuffer->{w2},
-            virtual_scan_code => $lpBuffer->{w3},
-            unicode_char      => $lpBuffer->{w4},
-            control_key_state => $lpBuffer->{d5},
+            key_down          => $ev[bKeyDown],
+            repeat_count      => $ev[wRepeatCount],
+            virtual_key_code  => $ev[wVirtualKeyCode],
+            virtual_scan_code => $ev[wVirtualScanCode],
+            unicode_char      => $ev[UnicodeChar],
+            control_key_state => $ev[dwControlKeyState],
           };
-          map { $lpBuffer->{$_} = 0 } qw( d0 w1 w2 w3 w4 d5 );
           last;
         };
-        case: mouse_event == $_ and do {
-          my ($x, $y) = unpack('SS', pack('V', $lpBuffer->{d0}));
+        case: MOUSE_EVENT == $_ and do {
+          push @ev, unpack('x4'.'LLLL', $buf);
+          my ($x, $y) = unpack('SS', pack('V', $ev[dwMousePosition]));
           $record->{event} = {
             mouse_pos => {
               x => $x,
               y => $y,
             },
-            button_state       => $lpBuffer->{w1},
-            control_key_state  => $lpBuffer->{w3},
-            event_flags        => $lpBuffer->{d5},
+            button_state       => $ev[dwButtonState],
+            control_key_state  => $ev[dwControlKeyState],
+            event_flags        => $ev[dwEventFlags],
           };
-          map { $lpBuffer->{$_} = 0 } qw( d0 w1 w3 d5 );
           last;
         };
-        case: window_buffer_size_event == $_ and do {
-          my ($x, $y) = unpack('SS', pack('V', $lpBuffer->{d0}));
+        case: WINDOW_BUFFER_SIZE_EVENT == $_ and do {
+          push @ev, unpack('x4'.'L', $record);
+          my ($x, $y) = unpack('SS', pack('V', $ev[dwSize]));
           $record->{event} = {
             size => {
               x => $x,
@@ -1258,6 +1239,57 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
     }
     $r;
   };
+  # my $r0 = do { # proc_read_console_input
+  #   state $lpBuffer = do {
+  #     my $record = Win32::API::Struct->new('INPUT_RECORD');
+  #     map { $record->{$_} = 0 } qw( EventType d0 w1 w2 w3 w4 d5 );
+  #     $record;
+  #   };
+  #   my $r = $proc_read_console_input->($h, $lpBuffer, 1, $tmp_arg);
+  #   if ($r) {
+  #     $record->{event_type} = $lpBuffer->{EventType};
+  #     $lpBuffer->{EventType} = 0;
+  #     switch: for ($record->{event_type}) {
+  #       case: key_event == $_ and do {
+  #         $record->{event} = {
+  #           key_down          => $lpBuffer->{d0},
+  #           repeat_count      => $lpBuffer->{w1},
+  #           virtual_key_code  => $lpBuffer->{w2},
+  #           virtual_scan_code => $lpBuffer->{w3},
+  #           unicode_char      => $lpBuffer->{w4},
+  #           control_key_state => $lpBuffer->{d5},
+  #         };
+  #         map { $lpBuffer->{$_} = 0 } qw( d0 w1 w2 w3 w4 d5 );
+  #         last;
+  #       };
+  #       case: mouse_event == $_ and do {
+  #         my ($x, $y) = unpack('SS', pack('V', $lpBuffer->{d0}));
+  #         $record->{event} = {
+  #           mouse_pos => {
+  #             x => $x,
+  #             y => $y,
+  #           },
+  #           button_state       => $lpBuffer->{w1},
+  #           control_key_state  => $lpBuffer->{w3},
+  #           event_flags        => $lpBuffer->{d5},
+  #         };
+  #         map { $lpBuffer->{$_} = 0 } qw( d0 w1 w3 d5 );
+  #         last;
+  #       };
+  #       case: window_buffer_size_event == $_ and do {
+  #         my ($x, $y) = unpack('SS', pack('V', $lpBuffer->{d0}));
+  #         $record->{event} = {
+  #           size => {
+  #             x => $x,
+  #             y => $y,
+  #           },
+  #         };
+  #         last;
+  #       };
+  #     }
+  #   }
+  #   $r;
+  # };
   my $e1 = $^E + 0;
   if (!$r0) {
     if ($e1) {
@@ -1457,19 +1489,34 @@ sub get_current_console_font { # $bSucceeded ($hConsoleOutput, \%dwFontSize)
 
   my $err;
   my $r0 = do { # proc_get_current_console_font
-    state $lpConsoleCurrentFont = Win32::API::Struct->new('CONSOLE_FONT_INFO');
-    $lpConsoleCurrentFont->{nFont} = 0;
-    $lpConsoleCurrentFont->{dwFontSize} = 0;
-    my $r = $proc_get_current_console_font->($h, 0, $lpConsoleCurrentFont);
+    my $font = pack('L2', (0) x 2);
+    my $uintptr = unpack(UINT_PTR, pack('P', $font));
+    my $r = $proc_get_current_console_font->($h, 0, $uintptr);
     if ($r) {
-      $info->{font} = $lpConsoleCurrentFont->{nFont};
-      (
-        $info->{font_size}->{x},
-        $info->{font_size}->{y},
-      ) = unpack 'SS', pack 'V', $lpConsoleCurrentFont->{dwFontSize};
+      my @font = unpack('LL', $font);
+      $info->{font} = $font[nFont];
+      my ($x, $y) = unpack('SS', pack('V', $font[dwFontSize]));
+      $info->{font_size} = {
+        x => $x,
+        y => $y,
+      };
     }
     $r;
   };
+  # my $r0 = do { # proc_get_current_console_font
+  #   state $lpConsoleCurrentFont = Win32::API::Struct->new('CONSOLE_FONT_INFO');
+  #   $lpConsoleCurrentFont->{nFont} = 0;
+  #   $lpConsoleCurrentFont->{dwFontSize} = 0;
+  #   my $r = $proc_get_current_console_font->($h, 0, $lpConsoleCurrentFont);
+  #   if ($r) {
+  #     $info->{font} = $lpConsoleCurrentFont->{nFont};
+  #     (
+  #       $info->{font_size}->{x},
+  #       $info->{font_size}->{y},
+  #     ) = unpack 'SS', pack 'V', $lpConsoleCurrentFont->{dwFontSize};
+  #   }
+  #   $r;
+  # };
 
   my $e1 = $^E + 0;
   if (!$r0) {

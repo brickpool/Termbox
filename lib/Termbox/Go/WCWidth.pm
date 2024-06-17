@@ -24,7 +24,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.0_0');
+our $VERSION = version->declare('v0.3.1');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
