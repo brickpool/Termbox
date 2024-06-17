@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.0_0');
+our $VERSION = version->declare('v0.3.1');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -61,6 +61,7 @@ use POSIX qw(
 use threads;
 use threads::shared;
 use Thread::Queue 3.07;
+require utf8;
 
 use Termbox::Go::Common qw( :all );
 use Termbox::Go::Devel qw(
@@ -700,7 +701,7 @@ sub send_char { # void ($x, $y, $ch)
     write_cursor($x, $y);
   }
   ($lastx, $lasty) = ($x, $y);
-  $outbuf->print(Encode::encode_utf8($ch));
+  $outbuf->print(Encode::encode('UTF-8' => $ch));
   return;
 }
 
@@ -1097,14 +1098,16 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
   }
 
   # the only possible option is utf8
-  if (my $n = utf8::upgrade($inbuf0)) {
-    $event->{Ch} = ord($inbuf0);
-    if ($event->{Ch} >= 0x80 && $event->{Ch} <= 0xff) {
-      # Note that characters from 128 to 255 (inclusive) are by 
-      # default internally not encoded as UTF-8 for backward 
-      # compatibility reasons.
-      $event->{Ch} = ord(Encode::decode(cp437 => $inbuf0));
-    }
+  my ($r, $n) = do {
+    # Decode the first character (UTF-8 uses a maximum of 4-byte code points
+    # and 'utf8::decode' handles any - even incomplete - encoding)
+    utf8::decode(my $str = bytes::substr($$inbuf_ref, 0, 4));
+    my $r = substr($str, 0, 1);
+    my $n = utf8::upgrade($r);
+    ($r, $n);
+  };
+  if ($r && $n) {
+    $event->{Ch} = ord($r);
     $event->{Key} = 0;
     $event->{N} = $n;
     return event_extracted;
