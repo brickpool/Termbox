@@ -20,7 +20,7 @@ WriteMakefile1(
     'Devel::StrictMode'               => 0.003,
     'List::Util'                      => 1.29,      # v5.14 => 1.23
     'Params::Util'                    => 1.07,
-    'Import::Into'                    => 1.002005,
+    'Import::Into'                    => 1.002004,
     'Thread::Queue'                   => 3.07,      # v5.14 => 2.12
     'Unicode::EastAsianWidth'         => 0,
     'Unicode::EastAsianWidth::Detect' => 0,

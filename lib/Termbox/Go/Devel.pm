@@ -237,7 +237,7 @@ sub usage { # $string ($message, $filename, $subroutine)
 }
 
 # Debug output macro.
-sub DEBUG_FMT :prototype($@) { # void ($fmt, @args)
+sub DEBUG_FMT($@) { # void ($fmt, @args)
   my ($fmt, @args) = @_;
   if (STRICT && exists &termbox::DebugHandler) {
     termbox::DebugHandler("$fmt.\n", @args);
@@ -246,12 +246,12 @@ sub DEBUG_FMT :prototype($@) { # void ($fmt, @args)
 }
 
 # Debug output macro.
-sub DEBUG :prototype($) { # void ($msg)
+sub DEBUG($) { # void ($msg)
   goto &DEBUG_FMT;
 }
 
 # Debug output macro.
-sub DEBUG_ERROR :prototype($$) { # void ($err, $msg)
+sub DEBUG_ERROR($$) { # void ($err, $msg)
   my ($err, $msg) = @_;
   my $pkg = __CALLER__(0)->{package}    // 'main';
   my $sub = __CALLER__(1)->{subroutine} // 'main::__ANON__';
@@ -261,7 +261,7 @@ sub DEBUG_ERROR :prototype($$) { # void ($err, $msg)
 }
 
 # Debug output macro.
-sub DEBUG_FAIL :prototype($) { # void ($msg)
+sub DEBUG_FAIL($) { # void ($msg)
   my ($msg) = @_;
   my ($errno, $errmsg) = ($!+0, "$!");
   my $pkg = __CALLER__(0)->{package}    // 'main';
@@ -272,7 +272,7 @@ sub DEBUG_FAIL :prototype($) { # void ($msg)
 }
 
 # Debug output macro.
-sub RETURN_UNDEF :prototype() { # void ()
+sub RETURN_UNDEF() { # void ()
   my $pkg = __CALLER__(0)->{package}    // 'main';
   my $sub = __CALLER__(1)->{subroutine} // 'main::__ANON__';
   my $__func__ = (split $pkg . '::', $sub)[-1];
@@ -281,7 +281,7 @@ sub RETURN_UNDEF :prototype() { # void ()
 }
 
 # Debug output macro.
-sub SHOW_CODE :prototype($) { # $errstr ($err)
+sub SHOW_CODE($) { # $errstr ($err)
   my $pkg = __CALLER__(0)->{package}    // 'main';
   my $sub = __CALLER__(1)->{subroutine} // 'main::__ANON__';
   my $__func__ = (split $pkg . '::', $sub)[-1];
@@ -291,7 +291,7 @@ sub SHOW_CODE :prototype($) { # $errstr ($err)
 }
 
 # Debug output macro.
-sub SHOW_CODEVAL :prototype($) { # $errno ($err)
+sub SHOW_CODEVAL($) { # $errno ($err)
   my $pkg = __CALLER__(0)->{package}    // 'main';
   my $sub = __CALLER__(1)->{subroutine} // 'main::__ANON__';
   my $__func__ = (split $pkg . '::', $sub)[-1];
@@ -302,13 +302,13 @@ sub SHOW_CODEVAL :prototype($) { # $errno ($err)
 # Debug output macro.
 # Returns the string "0E0", which evaluates to 0 as a number, but true as a 
 # boolean.
-sub RETURN_OK :prototype() { # $ ()
+sub RETURN_OK() { # $ ()
   $_[0] = "0E0";
   goto &SHOW_CODE;
 }
 
 # Debug output macro.
-sub SHOW_ERROR :prototype($$) { # $err ($err, $msg)
+sub SHOW_ERROR($$) { # $err ($err, $msg)
   my ($err, $msg) = @_;
   my $pkg = __CALLER__(0)->{package}    // 'main';
   my $sub = __CALLER__(1)->{subroutine} // 'main::__ANON__';
@@ -318,7 +318,7 @@ sub SHOW_ERROR :prototype($$) { # $err ($err, $msg)
 }
 
 # Debug output macro.
-sub SHOW_FAIL :prototype($) {# undef ($msg)
+sub SHOW_FAIL($) {# undef ($msg)
   my ($msg) = @_;
   my ($errno, $errmsg) = ($!+0, "$!");
   my $pkg = __CALLER__(0)->{package}    // 'main';
@@ -345,7 +345,7 @@ sub SHOW_POINTER { # \$|\@|\% (\$|\@|\%)
 
 # Debug output macro.
 # set $val to $err and prints the message $msg in STRICT mode.
-sub SET_ERROR :prototype($$$) { # void ($val, $err, $msg)
+sub SET_ERROR($$$) { # void ($val, $err, $msg)
   $_[0] = $_[1];
   shift; pop while @_ > 2;
   goto &DEBUG_ERROR;
@@ -353,14 +353,14 @@ sub SET_ERROR :prototype($$$) { # void ($val, $err, $msg)
 
 # Debug output macro.
 # Set $val to $!{EFAULT} and prints the message $msg in STRICT mode.
-sub SET_FAIL :prototype($$) { # void ($val, $msg)
+sub SET_FAIL($$) { # void ($val, $msg)
   $_[0] = EFAULT;
   shift; pop while @_ > 1;
   goto &DEBUG_FAIL;
 }
 
 # Debug output macro.
-sub TRACE :prototype($@) { # void ($fmt, @args)
+sub TRACE($@) { # void ($fmt, @args)
   my $fmt = shift;
   my $pkg = __CALLER__(0)->{package}    // 'main';
   my $sub = __CALLER__(1)->{subroutine} // 'main::__ANON__';
@@ -370,7 +370,7 @@ sub TRACE :prototype($@) { # void ($fmt, @args)
 }
 
 # Debug output macro.
-sub TRACE_VOID :prototype() { # void ()
+sub TRACE_VOID() { # void ()
   my $pkg = __CALLER__(0)->{package}    // 'main';
   my $sub = __CALLER__(1)->{subroutine} // 'main::__ANON__';
   my $__func__ = (split $pkg . '::', $sub)[-1];

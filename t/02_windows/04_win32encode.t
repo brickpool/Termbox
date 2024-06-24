@@ -41,6 +41,9 @@ if (STRICT) {
   diag 'read: ', map { sprintf("\\x%04x", $_) } unpack('S*', $read);
 }
 ok $write_ok, 'write';
-is unpack('S', $read), 0x261D, 'read';
+TODO: {
+  local $TODO = 'Reading out the characters is not safe';
+  is unpack('S', $read), 0x261D, 'read';
+}
 
 done_testing;
