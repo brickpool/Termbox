@@ -39,3 +39,5 @@ inc/
 .vscode
 /src
 /trial
+*.komodoproject
+/.komodotools/
