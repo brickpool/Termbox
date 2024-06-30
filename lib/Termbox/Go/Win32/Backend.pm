@@ -2124,7 +2124,7 @@ sub input_event_producer { # $bSucceeded ()
   LOOP: for (;;) {
     if (!wait_for_multiple_objects($handles)) {
       $input_comm->enqueue( Event{Type => EventError, Err => $^E} );
-      # Win32::OutputDebugString(§input_comm: $^E");
+      # Win32::OutputDebugString("input_comm: $^E");
     }
 
     select: {
@@ -2137,7 +2137,7 @@ sub input_event_producer { # $bSucceeded ()
 
     if (!read_console_input($in, $r = {})) {
       $input_comm->enqueue( Event{Type => EventError, Err => $^E} );
-      # Win32::OutputDebugString(§input_comm: $^E");
+      # Win32::OutputDebugString("input_comm: $^E");
     }
 
     switch: for ($r->{event_type}) {

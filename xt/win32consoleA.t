@@ -50,7 +50,7 @@ ok $event[5] && $event[5] >= 32, 'valid event';
 if ($event[5] == 32) {
   note 'Not compiled with pragma UNICODE.';
 } else {
-  note 'Compiled with pramgma UNICODE or bug fixed!';
+  note 'Compiled with pragma UNICODE or bug fixed!';
 }
 
 done_testing;

@@ -64,10 +64,11 @@ use Termbox::Go::Devel qw(
   usage
 );
 use Termbox::Go::Terminal;
-use Termbox::Go::Terminal::Backend qw( 
+use Termbox::Go::Terminal::Backend qw(
   coord_invalid
   attr_invalid
   input_event
+  get_term_size
   :vars
 );
 use Termbox::Go::Terminfo qw( setup_term_builtin );
@@ -463,36 +464,6 @@ sub read_console_input { # @events ($hConsoleInput)
   }
   # SHOW_CODE($e1);
   $err ? return : @events;
-}
-
-# ------------------------------------------------------------------------
-# Terminal::Backend ------------------------------------------------------
-# ------------------------------------------------------------------------
-
-# The call to Term::ReadKey::GetTerminalSize did not work if the handle was 
-# redirected or duplicated, so we need to mock the original 
-# Terminal::Backend::get_term_size() subroutine.
-sub get_term_size { # $cols, $rows ($fd)
-  my ($fd) = @_;
-  croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 1                    ? EINVAL
-        : @_ > 1                    ? E2BIG
-        : !defined(_NONNEGINT($fd)) ? EINVAL
-        : 0;
-        ;
-
-  my $hConsole = FdGetOsFHandle($fd) // INVALID_HANDLE_VALUE;
-  my ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($hConsole);
-  if (!$col || !$row) {
-    $! = ENOTTY;
-    return;
-  }
-  return ($col, $row);
-}
-
-{
-  no warnings 'redefine';
-  *Termbox::Go::Terminal::Backend::get_term_size = \&get_term_size;
 }
 
 # ------------------------------------------------------------------------
