@@ -561,18 +561,22 @@ sub get_term_size { # $cols, $rows ($fd)
         ;
 
   my ($col, $row);
-  my $fh = IO::File->new_from_fd($fd, 'w')
-    or return;
   local $@;
-  if (eval { require Term::ReadKey }) {
-    # This is more portable than the raw ioctl
-    ($col, $row) = Term::ReadKey::GetTerminalSize($fh);
-  } elsif (exists &TIOCGWINSZ) {
-    ioctl($fh, &TIOCGWINSZ, my $sz = '');
-    ($col, $row) = unpack('S2', $sz);
+  if (eval { require Win32::Console }) {
+    require Win32API::File;
+    my $h = Win32API::File::FdGetOsFHandle($fd) // -1;
+    if ($h != -1) {
+      ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($h);
+    }
+  } elsif (eval { require 'sys/ioctl.ph' }) {
+    my $fh = IO::File->new_from_fd($fd, 'w');
+    if (-t $fh) {
+      ioctl($fh, &TIOCGWINSZ, my $sz = '');
+      ($col, $row) = unpack('S2', $sz);
+    }
   }
   if (!$col || !$row) {
-    $! = ENOTTY;
+    $! ||= ENOTTY;
     return;
   }
   return ($col, $row);
