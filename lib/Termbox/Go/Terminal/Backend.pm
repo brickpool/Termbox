@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024,2025 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminal::Backend;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.2');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -1126,8 +1126,8 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
 # key was pressed, to account for partially send escape sequences, especially
 # with regard to lengthy mouse sequences.
 # See L<https://github.com/nsf/termbox-go/issues/132>
-sub enable_wait_for_escape_sequence { # $ ()
-	return $OSNAME eq 'darwin';
+sub enable_wait_for_escape_sequence() { # $ ()
+	$OSNAME eq 'darwin';
 }
 
 1;
@@ -1166,7 +1166,7 @@ Termbox for Terminal.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 

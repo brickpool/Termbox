@@ -5,7 +5,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024,2025 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::WinVT;
@@ -21,7 +21,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.2');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -31,6 +31,7 @@ our $AUTHORITY = 'github:brickpool';
 # Imports ----------------------------------------------------------------
 # ------------------------------------------------------------------------
 
+require bytes; # not use, see https://perldoc.perl.org/bytes
 use Carp qw( croak );
 use Config;
 use Devel::StrictMode;
@@ -322,21 +323,21 @@ sub peek_console_input { # @events ($hConsoleInput)
   my $e1 = $^E + 0;
   if ($r0) {
     if ($readRecords) {
-      push @events, unpack('L', $record);
+      @events = unpack('L', $record) & 0xffff;
       switch: for ($events[0]) {
         case: $_ == KEY_EVENT and do {
-          @events = unpack('LLSSSSL', $record);
+          push @events, unpack('x4'.'LSSSSL', $record);
           last;
         };
         case: $_ == MOUSE_EVENT and do {
-          @events = unpack('LLLLL', $record);
+          push @events, unpack('x4'.'LLLL', $record);
           last;
         };
         case: $_ == WINDOW_BUFFER_SIZE_EVENT || 
               $_ == MENU_EVENT || 
               $_ == FOCUS_EVENT 
         and do {
-          @events = unpack('LL', $record);
+          push @events, unpack('x4'.'L', $record);
           last;
         };
       }
@@ -356,7 +357,6 @@ sub peek_console_input { # @events ($hConsoleInput)
 # function. The handle must have GENERIC_READ access. 
 # Further details:: https://stackoverflow.com/a/73571717
 sub peek_named_pipe { # $nTotalBytesAvail ($hNamedPipe)
-  # TRACE_VOID();
   my ($h) = @_;
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
     $^E = @_ != 1       ? ERROR_BAD_ARGUMENTS
@@ -375,7 +375,6 @@ sub peek_named_pipe { # $nTotalBytesAvail ($hNamedPipe)
       $err = $^E = WSAEINVAL;
     }
   }
-  # SHOW_CODE($available // 0);
   $err ? return : $available;
 }
 
@@ -416,7 +415,6 @@ sub peek_named_pipe { # $nTotalBytesAvail ($hNamedPipe)
 # - bSetFocus: Reserved.
 #
 sub read_console_input { # @events ($hConsoleInput)
-  # TRACE_VOID();
   my ($h) = @_;
   (STRICT ? croak(usage("$^E", __FILE__, __FUNCTION__)) : return) if
     $^E = @_ != 1       ? ERROR_BAD_ARGUMENTS
@@ -436,7 +434,7 @@ sub read_console_input { # @events ($hConsoleInput)
   my $e1 = $^E + 0;
   if ($r0) {
     if ($readRecords) {
-      push @events, unpack('L', $record);
+      @events = unpack('L', $record) & 0xffff;
       switch: for ($events[0]) {
         case: $_ == KEY_EVENT and do {
           push @events, unpack('x4'.'LSSSSL', $record);
@@ -462,7 +460,6 @@ sub read_console_input { # @events ($hConsoleInput)
       $err = $^E = WSAEINVAL;
     }
   }
-  # SHOW_CODE($e1);
   $err ? return : @events;
 }
 
@@ -487,7 +484,6 @@ sub Init { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  # TRACE_VOID();
   if ($IsInit) {
     return 0;
   }
@@ -514,43 +510,38 @@ sub Init { # $errno ()
   # descriptor has been made nonblocking (see below).
   $outfd = fileno($out);
 
+  # create an equivalent to SIGWINCH and SIGIO
   $notify = threads->create(sub {
-    # TRACE_VOID();
     local $SIG{'KILL'} = sub { threads->exit() };
     my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
     die($^E = ERROR_INVALID_HANDLE) if $hInput == INVALID_HANDLE_VALUE;
     my $hOutput = FdGetOsFHandle($outfd) // INVALID_HANDLE_VALUE;
     die($^E = ERROR_INVALID_HANDLE) if $hOutput == INVALID_HANDLE_VALUE;
     my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
-    # DEBUG_FMT('FileType: %d', $uFileType);
     for (;;) {
       switch: for ($uFileType) {
         case: $_ == FILE_TYPE_CHAR and do {
           # Get the number of unread input records in the input buffer of the 
           # console. This includes keyboard and mouse events, but also events
-          # for resizing.
+          # for resizing (and some other).
           if (Win32::Console::_GetNumberOfConsoleInputEvents($hInput)) {
-            # DEBUG('NumberOfEvents > 0') unless $sigio->pending();
             my @events = peek_console_input($hInput);
             die $^E if $^E;
             switch: for ($events[0]) {
               case: $_ == KEY_EVENT and do {
-                # DEBUG('KEY_EVENT') unless $sigio->pending();
                 $sigio->pending() or $sigio->enqueue(TRUE);
                 last;
               };
               case: $_ == WINDOW_BUFFER_SIZE_EVENT and do {
-                # DEBUG('WINDOW_BUFFER_SIZE_EVENT') unless $sigwinch->pending();
                 $sigwinch->pending() or $sigwinch->enqueue(TRUE);
                 last;
-              }
+              };
             }
           }
           last;
         }; # case: $_ == FILE_TYPE_CHAR
         case: $_ == FILE_TYPE_DISK || $_ == FILE_TYPE_PIPE and do {
           if (peek_named_pipe($hInput)) {
-            # DEBUG('TotalBytesAvail > 0') unless $sigio->pending();
             $sigio->pending() or $sigio->enqueue(TRUE);
           }
           last;
@@ -663,8 +654,9 @@ sub Init { # $errno ()
   # $front_buffer->clear();
 
   threads->create(sub {
-    # TRACE_VOID();
+    use bytes;
     my $buf = "\0" x 128;
+    input_event(substr($buf, 0, 0), $err);
     my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
     die($^E = ERROR_INVALID_HANDLE) if $hInput == INVALID_HANDLE_VALUE;
     my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
@@ -701,13 +693,13 @@ sub Init { # $errno ()
                             || $ir[wVirtualKeyCode] == VK_SCROLL;
                         while ($ir[wRepeatCount]--) {
                           my $ch = chr($ir[UnicodeChar]);
-                          my $w = bytes::length($ch);
+                          my $w = length($ch);
                           # DEBUG_FMT('codepoint: %#x, bytes: %d, char: %s', $ir[UnicodeChar], $w, $ch);
                           # There is a small hidden flaw here. If the number 
                           # of same characters is too high, these characters 
                           # are discarded now.
                           last process_event if $n + $w > 128;
-                          bytes::substr($buf, $n, $w, $ch);
+                          substr($buf, $n, $w, $ch);
                           $n += $w;
                         }
                         last;
@@ -734,27 +726,23 @@ sub Init { # $errno ()
                 die $^E = ERROR_BAD_FILE_TYPE;
               }
             } # switch: for ($uFileType)
-            # DEBUG_FMT("read %d bytes", $n) if $n;
             my $err = $^E+0;
             if ($err == WSAEWOULDBLOCK) {
               last;
             }
             select: {
               my $ie;
-              case: ($ie = input_event(bytes::substr($buf, 0, $n), $err)) and do {
-                # DEBUG_FMT('enqueue {%s} to input_comm', "@{[%$ie]}");
+              case: ($ie = input_event(substr($buf, 0, $n), $err)) and do {
                 $input_comm->enqueue($ie);
-                bytes::substr($buf, $n, (128-$n), "\0" x (128-$n));
+                substr($buf, $n, (128-$n), "\0" x (128-$n));
               };
               case: $quit->dequeue_nb() and do {
-                # RETURN_OK;
                 return 0;
               };
             }
           } # for (;;)
         }; # case: $sigio->dequeue_nb()
         case: $quit->dequeue_nb() and do {
-          # RETURN_OK;
           return 0;
         };
       }
@@ -779,7 +767,6 @@ sub Close { # $errno ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  # TRACE_VOID();
   if (!$IsInit) {
     return $! = EBADF;
   }
@@ -1056,7 +1043,7 @@ e.g. to set the input or output mode and codepage.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 

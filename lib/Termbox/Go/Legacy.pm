@@ -8,7 +8,7 @@
 #                 2015-2024 Adam Saponara <as@php.net>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024,2025 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Legacy;
@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_0');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.2');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -1298,8 +1298,8 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
   }
   map { $tb_event->{$_} = 0 } keys %{tb_event()};
   switch: for ($ev->{Type} // -1) {
-    # STDERR->say("@{[%$ev]}");
     case: EventKey == $_ and do {
+      # DEBUG_FMT("EventKey:%s", "@{[%$ev]}");
       $tb_event->{type} = TB_EVENT_KEY;
       $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
       $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
@@ -1308,12 +1308,14 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
       return TB_OK;
     };
     case: EventResize == $_ and do {
+      # DEBUG_FMT("EventResize:%s", "@{[%$ev]}");
       $tb_event->{type} = TB_EVENT_RESIZE;
       $tb_event->{w}    = $ev->{Width};
       $tb_event->{h}    = $ev->{Height};
       return TB_OK;
     };
     case: EventMouse == $_ and do {
+      # DEBUG_FMT("EventMouse:%s", "@{[%$ev]}");
       $tb_event->{type} = TB_EVENT_MOUSE;
       $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
       $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
@@ -1323,6 +1325,7 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
       return TB_OK;
     };
     case: EventInterrupt == $_ and do {
+      # DEBUG("EventInterrupt");
       $last_errno = $! = EINTR;
       return TB_ERR_NO_EVENT;
     };
@@ -1359,8 +1362,8 @@ sub tb_poll_event { # $result (\%event)
   }
   map { $tb_event->{$_} = 0 } keys %{tb_event()};
   switch: for ($ev->{Type} // -1) {
-    # STDERR->say("@{[%$ev]}");
     case: EventKey == $_ and do {
+      # DEBUG_FMT("EventKey:%s", "@{[%$ev]}");
       $tb_event->{type} = TB_EVENT_KEY;
       $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
       $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
@@ -1369,12 +1372,14 @@ sub tb_poll_event { # $result (\%event)
       return TB_OK;
     };
     case: EventResize == $_ and do {
+      # DEBUG_FMT("EventResize:%s", "@{[%$ev]}");
       $tb_event->{type} = TB_EVENT_RESIZE;
       $tb_event->{w}    = $ev->{Width};
       $tb_event->{h}    = $ev->{Height};
       return TB_OK;
     };
     case: EventMouse == $_ and do {
+      # DEBUG_FMT("EventMouse:%s", "@{[%$ev]}");
       $tb_event->{type} = TB_EVENT_MOUSE;
       $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
       $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
@@ -1384,6 +1389,7 @@ sub tb_poll_event { # $result (\%event)
       return TB_OK;
     };
     case: EventInterrupt == $_ and do {
+      # DEBUG("EventInterrupt");
       $last_errno = $! = EINTR;
       return TB_ERR_NO_EVENT;
     };
@@ -1635,7 +1641,7 @@ Legacy Interface of Termbox based on termbox2 v2.5.0-dev, 9. Feb 2024.
  
  Copyright (C) 2012 by termbox-go authors
                2010-2020 nsf <no.smile.face@gmail.com>
-               2015-2024 Adam Saponara <as@php.net>
+               2015-2024,2025 Adam Saponara <as@php.net>
  
  The content of the library was taken from termbox-go and the interface was 
  taken from the termbox2 implementation of Termbox, which is licensed under 
@@ -1655,7 +1661,7 @@ Legacy Interface of Termbox based on termbox2 v2.5.0-dev, 9. Feb 2024.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 

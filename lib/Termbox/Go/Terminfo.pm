@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author => 2024 J. Schneider
+#   Author => 2024,2025 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminfo;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.2');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -441,7 +441,7 @@ Termbox for *nix.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
