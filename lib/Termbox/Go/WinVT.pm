@@ -21,7 +21,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.2');
+our $VERSION = version->declare('v0.3.0_3');
 
 # authority '...'
 our $authority = 'github:nsf';

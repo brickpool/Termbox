@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_0');
-our $VERSION = version->declare('v0.3.2');
+our $VERSION = version->declare('v0.3.0_3');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -64,7 +64,7 @@ use Termbox::Go::Devel qw(
 );
 use Termbox::Go::Common qw(
   :all 
-  !:types
+  !Cell
 );
 
 my %module = (
@@ -871,6 +871,21 @@ BEGIN {
 
 =cut
 
+q/*
+use Termbox::Go::Devel qw( :all );
+sub termbox::DebugHandler {    # void ($fmt, @args)
+  my ( $fmt, @args ) = @_;
+  if ( $^O eq 'MSWin32' ) {
+    require Win32;
+    Win32::OutputDebugString( sprintf( $fmt, @args ) );
+  }
+  else {
+    STDERR->printf( $fmt, @args );
+  }
+  return;
+}
+*/ if 0;
+
 # ------------------------------------------------------------------------
 # Functions --------------------------------------------------------------
 # ------------------------------------------------------------------------
@@ -944,7 +959,6 @@ sub tb_width { # $rows ()
     die;
   }
   return $rows;
-
 }
 
 # Returns the height of the internal back buffer (which is the same as terminal's
@@ -1255,31 +1269,31 @@ sub tb_set_output_mode { # $result ($mode)
   return $rv;
 }
 
-# Wait for an event up to timeout_ms milliseconds and fill the event structure
-# with it. If no event is available within the timeout period, TB_ERR_NO_EVENT
-# is returned. On a resize event, the underlying C<select> call may be
-# interrupted, yielding a return code of TB_ERR_POLL. In this case, you may
-# check errno via C<$!>. If it's EINTR, you can safely ignore that
-# and call tb_peek_event() again.
-sub tb_peek_event { # $result (\%event, $timeout_ms)
-  my ($tb_event, $timeout_ms) = @_;
+sub wait_event { # $result (\%event, $timeout)
+  my ($tb_event, $timeout) = @_;
   croak(usage("$!", __FILE__, __FUNCTION__)) if
-    $!  = @_ < 2                ? EINVAL
-        : @_ > 2                ? E2BIG
-        : !tb_event($tb_event)  ? EINVAL
-        : !_POSINT($timeout_ms) ? EINVAL
+    $!  = @_ < 2                      ? EINVAL
+        : @_ > 2                      ? E2BIG
+        : !tb_event($tb_event)        ? EINVAL
+        : !defined(_NUMBER($timeout)) ? EINVAL
+        : $timeout - int($timeout)    ? EINVAL
         : undef
         ;
 
-  return TB_ERR_NOT_INIT if not $IsInit;
   my $ev;
-  local $@;
-  try: eval {
-    local $SIG{ALRM} = sub { "alarm\n" }; # supress '...no signal handler set.'
+  map { $tb_event->{$_} = 0 } keys %{tb_event()};
+  if ( $termbox eq 'Termbox::Go::Win32' ) {
+    # We can use an Win32 optimized version here
+    $ev = $timeout >= 0
+        ? $input_comm->dequeue_timed( $timeout / 1000 )
+        : $input_comm->dequeue();
+  } elsif ( $timeout >= 0 ) {
+    # General timeout implementation, but fragile
+    local $SIG{ALRM} = sub { "alarm\n" }; # supress '..no signal handler set.'
     my $alarm = threads->create(
       sub {
         local $SIG{ALRM} = sub { threads->exit };
-        Time::HiRes::sleep($timeout_ms / 1000);
+        Time::HiRes::sleep($timeout / 1000);
         $termbox->Interrupt();
         return;
       }
@@ -1287,16 +1301,11 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
     $alarm->detach();
     $ev = $termbox->PollEvent();
     $alarm->kill('ALRM');
-    1;
-  } // ($@ ||= 'Died');
-  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
-    $last_errno = $!+0;
-    croak usage("$!", __FILE__, __FUNCTION__);
+  } else {
+    # No timeout, so simply call PollEvent
+    $ev = $termbox->PollEvent();
   }
-  catch: if ($@) {
-    die;
-  }
-  map { $tb_event->{$_} = 0 } keys %{tb_event()};
+
   switch: for ($ev->{Type} // -1) {
     case: EventKey == $_ and do {
       # DEBUG_FMT("EventKey:%s", "@{[%$ev]}");
@@ -1336,6 +1345,39 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
   }
 }
 
+# Wait for an event up to timeout_ms milliseconds and fill the event structure
+# with it. If no event is available within the timeout period, TB_ERR_NO_EVENT
+# is returned. On a resize event, the underlying C<select> call may be
+# interrupted, yielding a return code of TB_ERR_POLL. In this case, you may
+# check errno via C<$!>. If it's EINTR, you can safely ignore that
+# and call tb_peek_event() again.
+sub tb_peek_event { # $result (\%event, $timeout_ms)
+  my ($tb_event, $timeout_ms) = @_;
+  croak(usage("$!", __FILE__, __FUNCTION__)) if
+    $!  = @_ < 2                ? EINVAL
+        : @_ > 2                ? E2BIG
+        : !tb_event($tb_event)  ? EINVAL
+        : !_POSINT($timeout_ms) ? EINVAL
+        : undef
+        ;
+
+  return TB_ERR_NOT_INIT if not $IsInit;
+  my $rv;
+  local $@;
+  try: eval {
+    $rv = wait_event($tb_event, $timeout_ms);
+    1;
+  } // ($@ ||= 'Died');
+  catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
+    $last_errno = $!+0;
+    croak usage("$!", __FILE__, __FUNCTION__);
+  }
+  catch: if ($@) {
+    die;
+  }
+  return $rv;
+}
+
 # Same as tb_peek_event except no timeout.
 sub tb_poll_event { # $result (\%event)
   my ($tb_event) = @_;
@@ -1347,10 +1389,10 @@ sub tb_poll_event { # $result (\%event)
         ;
 
   return TB_ERR_NOT_INIT if not $IsInit;
-  my $ev;
+  my $rv;
   local $@;
   try: eval {
-    $ev = $termbox->PollEvent();
+    $rv = wait_event($tb_event, -1);
     1;
   } // ($@ ||= 'Died');
   catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
@@ -1360,44 +1402,7 @@ sub tb_poll_event { # $result (\%event)
   catch: if ($@) {
     die;
   }
-  map { $tb_event->{$_} = 0 } keys %{tb_event()};
-  switch: for ($ev->{Type} // -1) {
-    case: EventKey == $_ and do {
-      # DEBUG_FMT("EventKey:%s", "@{[%$ev]}");
-      $tb_event->{type} = TB_EVENT_KEY;
-      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
-      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
-      $tb_event->{key}  = $ev->{Key};
-      $tb_event->{ch}   = $ev->{Ch};
-      return TB_OK;
-    };
-    case: EventResize == $_ and do {
-      # DEBUG_FMT("EventResize:%s", "@{[%$ev]}");
-      $tb_event->{type} = TB_EVENT_RESIZE;
-      $tb_event->{w}    = $ev->{Width};
-      $tb_event->{h}    = $ev->{Height};
-      return TB_OK;
-    };
-    case: EventMouse == $_ and do {
-      # DEBUG_FMT("EventMouse:%s", "@{[%$ev]}");
-      $tb_event->{type} = TB_EVENT_MOUSE;
-      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
-      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
-      $tb_event->{key}  = $ev->{Key};
-      $tb_event->{x}    = $ev->{MouseX};
-      $tb_event->{y}    = $ev->{MouseY};
-      return TB_OK;
-    };
-    case: EventInterrupt == $_ and do {
-      # DEBUG("EventInterrupt");
-      $last_errno = $! = EINTR;
-      return TB_ERR_NO_EVENT;
-    };
-    default: {
-      $last_errno = $! = EAGAIN;
-      return TB_ERR_POLL;
-    }
-  }
+  return $rv;
 }
 
 # Print function. For finer control, use L</tb_set_cell>.

@@ -1,11 +1,15 @@
 Revision history for Termbox::Go
 
-0.003_002
+0.003003
+        2025-05-14
+        - Change Legacy function tb_peek_event for Win32
+
+0.003002
         2025-04-30
         - fix SIGIO Windows VT handling
         - fix padding of EventType in INPUT_RECORD
 
-0.003_001
+0.003001
         2024-06-17
         - Encapsulation of the Win32::API imports
         - fix Terminal Unicode support
@@ -17,7 +21,7 @@ Revision history for Termbox::Go
 0.002   2024-05-31
         - Add Terminal support
 
-0.001_001
+0.001001
         2024-05-16
         - Upload to github
         - Publication of the first release
