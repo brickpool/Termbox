@@ -50,7 +50,8 @@ Exit by pressing any key.
 
 =head1 DESCRIPTION
 
-10 PRINT is a one-line Commodore 64 BASIC program, published in November 2012. 
+C<10 PRINT> is a one-line Commodore 64 BASIC program. In November 2012, a book 
+was published that is devoted exclusively to this expression. 
 
   10 PRINT CHR$(205.5+RND(1)); : GOTO 10
 

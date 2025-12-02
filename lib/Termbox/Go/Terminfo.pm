@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author => 2024,2025 J. Schneider
+#   Author: 2024,2025 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminfo;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.0_3');
+our $VERSION = version->declare('v0.3.4');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -338,12 +338,14 @@ sub setup_term { # $success ()
     # old quirk to align everything on word boundaries
     $header[2] += 1;
   }
-  $str_offset = ti_header_length + $header[1] + $header[2] + $number_sec_len*$header[3];
+  $str_offset = ti_header_length + $header[1] + $header[2] 
+    + $number_sec_len*$header[3];
   $table_offset = $str_offset + 2*$header[4];
 
   $keys = [];
   for my $i (0 .. 0xffff - key_min -1) {
-    $keys->[$i] = ti_read_string($rd, $str_offset+2*$ti_keys->[$i], $table_offset);
+    $keys->[$i] = ti_read_string($rd, $str_offset+2*$ti_keys->[$i], 
+      $table_offset);
     if ($!) {
       return;
     }
@@ -352,7 +354,8 @@ sub setup_term { # $success ()
   # the last two entries are reserved for mouse. because the table offset is
   # not there, the two entries have to fill in manually
   for my $i (0 .. t_max_funcs - 2 -1) {
-    $funcs->[$i] = ti_read_string($rd, $str_offset+2*$ti_funcs->[$i], $table_offset);
+    $funcs->[$i] = ti_read_string($rd, $str_offset+2*$ti_funcs->[$i], 
+      $table_offset);
     if ($!) {
       return;
     }

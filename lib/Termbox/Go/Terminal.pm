@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.0_3');
+our $VERSION = version->declare('v0.3.4');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -670,9 +670,10 @@ sub PollEvent { # \%Event ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  # Constant governing macOS specific behavior. See https://github.com/nsf/termbox-go/issues/132
-  # This is an arbitrary delay which hopefully will be enough time for any lagging
-  # partial escape sequences to come through.
+  # Constant governing macOS specific behavior. 
+  # See https://github.com/nsf/termbox-go/issues/132 This is an arbitrary delay 
+  # which hopefully will be enough time for any lagging partial escape 
+  # sequences to come through.
   use constant esc_wait_delay => 100/1000; # 100 ms
 
   my $event = Event();

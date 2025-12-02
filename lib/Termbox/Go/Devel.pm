@@ -23,7 +23,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.0_3');
+our $VERSION = version->declare('v0.3.4');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -195,7 +195,7 @@ sub __FUNCTION__ { # $subname ()
   return $__func__;
 }
 
-# Print usage messages from embedded (auto)pod in file.
+# Returns a usage message from the embedded (auto)pod of a file.
 sub usage { # $string ($message, $filename, $subroutine)
   my ($msg, $file, $sub) = @_;
   local ($!, $@);

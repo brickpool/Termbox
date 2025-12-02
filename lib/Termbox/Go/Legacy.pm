@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_0');
-our $VERSION = version->declare('v0.3.0_3');
+our $VERSION = version->declare('v0.3.4');
 
 # authority '...'
 our $authority = 'github:adsr';

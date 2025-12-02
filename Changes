@@ -1,5 +1,9 @@
 Revision history for Termbox::Go
 
+0.003004
+        2025-11-02
+        - Change from error codes in Win32
+
 0.003003
         2025-05-14
         - Change Legacy function tb_peek_event for Win32
