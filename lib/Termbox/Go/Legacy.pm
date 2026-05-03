@@ -8,7 +8,7 @@
 #                 2015-2024 Adam Saponara <as@php.net>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024,2025 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Legacy;
@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_0');
-our $VERSION = version->declare('v0.3.4');
+our $VERSION = version->declare('v0.3.5');
 
 # authority '...'
 our $authority = 'github:adsr';

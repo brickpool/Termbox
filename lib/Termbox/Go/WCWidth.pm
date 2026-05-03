@@ -9,7 +9,7 @@
 #                 2015 bluebear94 <tkook11@gmail.com>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024,2025 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::WCWidth;
@@ -24,7 +24,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.4');
+our $VERSION = version->declare('v0.3.5');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';

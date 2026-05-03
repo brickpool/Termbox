@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024,2025 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminal::Backend;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.4');
+our $VERSION = version->declare('v0.3.5');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -207,6 +207,15 @@ our %EXPORT_TAGS = (
 }
 
 # ------------------------------------------------------------------------
+# Constants --------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+# Use NCCS (if available); otherwise, read at least 32 fields.
+if (!eval { &POSIX::NCCS }) {
+  *NCCS = sub () { 32 };
+}
+
+# ------------------------------------------------------------------------
 # Types ------------------------------------------------------------------
 # ------------------------------------------------------------------------
 
@@ -306,7 +315,7 @@ sub syscall_Termios { # \%|undef (|@|\%)
     Oflag     => 0,
     Cflag     => 0,
     Lflag     => 0,
-    Cc        => [],
+    Cc        => [ (0) x NCCS ],
     Ispeed    => 0,
     Ospeed    => 0,
   };
@@ -358,19 +367,19 @@ use constant {
 # ------------------------------------------------------------------------
 
 # termbox inner state
-our $orig_tios        = syscall_Termios();
-our $termw            = 0;
-our $termh            = 0;
-our $outfd            = 0;
-our $lastfg           = attr_invalid;
-our $lastbg           = attr_invalid;
-our $lastx            = coord_invalid;
-our $lasty            = coord_invalid;
-our $inbuf    :shared = '';
-our $outbuf;            open($outbuf, "+>", \my $outstr);
-our $sigwinch :shared = $_ = Thread::Queue->new(); $_->limit(1);
-our $sigio    :shared = $_ = Thread::Queue->new(); $_->limit(1);
-our $quit     :shared = Thread::Queue->new();
+our $orig_tios     = syscall_Termios();
+our $termw         = 0;
+our $termh         = 0;
+our $outfd         = 0;
+our $lastfg        = attr_invalid;
+our $lastbg        = attr_invalid;
+our $lastx         = coord_invalid;
+our $lasty         = coord_invalid;
+our $inbuf :shared = '';
+our $outbuf;         open($outbuf, "+>", \my $outstr);
+our $sigwinch      = Thread::Queue->new(); $sigwinch->limit(1);
+our $sigio         = Thread::Queue->new(); $sigio->limit(1);
+our $quit          = Thread::Queue->new();
 
 # grayscale indexes
 our $grayscale = [
@@ -457,7 +466,7 @@ sub write_sgr_bg { # void ($a)
     };
     case: $_ == OutputRGB && do {
       my ($r, $g, $b) = AttributeToRGB($a);
-      $outbuf->print(escapeRGB(TRUE, $r, $g, $b));
+      $outbuf->print(escapeRGB(FALSE, $r, $g, $b));
       last;
     };
     default: {
@@ -562,8 +571,7 @@ sub get_term_size { # $cols, $rows ($fd)
 
   my ($col, $row);
   local $@;
-  if (eval { require Win32::Console }) {
-    require Win32API::File;
+  if (eval { require Win32::Console; require Win32API::File }) {
     my $h = Win32API::File::FdGetOsFHandle($fd) // -1;
     if ($h != -1) {
       ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($h);
@@ -571,8 +579,25 @@ sub get_term_size { # $cols, $rows ($fd)
   } elsif (eval { require 'sys/ioctl.ph' }) {
     my $fh = IO::File->new_from_fd($fd, 'w');
     if (-t $fh) {
-      ioctl($fh, &TIOCGWINSZ, my $sz = '');
-      ($col, $row) = unpack('S2', $sz);
+      my $sz = pack('S4', 0,0,0,0);
+      if ( ioctl($fh, &TIOCGWINSZ, $sz) ) {
+        ($row, $col) = unpack('S4', $sz);
+      }
+    }
+  } elsif (eval { require Term::ReadKey }) {
+    my $fh = IO::File->new_from_fd($fd, 'w');
+    ($col, $row) = Term::ReadKey::GetTerminalSize($fh);
+  }
+  if (!$col || !$row) {
+    if (-t STDIN) {
+      # -a is POSIX, --all is not
+      local $_ = '' . `stty -a 2>/dev/null`;
+      if (m/(?:;\s*rows\s+(\d+);|;\s*(\d+)\s+rows;)/) {
+        $row = $1 ? $1 : $2 ? $2 : 0;
+      }
+      if (m/(?:;\s*columns\s+(\d+);|;\s*(\d+)\s+columns;)/) {
+        $col = $1 ? $1 : $2 ? $2 : 0;
+      }
     }
   }
   if (!$col || !$row) {
@@ -682,7 +707,7 @@ sub send_attr { # void ($fg, $bg)
   if ($fg & AttrDim) {
     $outbuf->print($funcs->[t_dim]);
   }
-  if ($fg & AttrReverse | $bg & AttrReverse) {
+  if (($fg & AttrReverse) || ($bg & AttrReverse)) {
     $outbuf->print($funcs->[t_reverse])
   }
 
@@ -698,6 +723,7 @@ sub send_char { # void ($x, $y, $ch)
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
         : !defined(_STRING($ch))    ? EINVAL
+        : !length($ch)              ? EINVAL
         : 0;
         ;
 
@@ -714,11 +740,24 @@ sub flush { # $succeded ()
     $! = @_ ? E2BIG : 0;
 
   $outbuf->flush();
-  my $err = defined(syswrite($out, $outstr)) ? 0 : $!+0;
+  my $len = length($outstr);
+  my $off = 0;
+
+  while ($off < $len) {
+    my $n = syswrite($out, $outstr, $len - $off, $off);
+    if (!defined $n) {
+      my $err = $! + 0;
+      $outbuf->seek(0, 0);
+      $outstr = '';
+      $! = $err;
+      return;
+    }
+    $off += $n;
+  }
+
   $outbuf->seek(0, 0);
-  $err ||= $!+0;
   $outstr = '';
-  return $err ? undef : "0E0";
+  return "0E0";
 }
 
 sub send_clear { # $succeded ()
@@ -826,11 +865,10 @@ sub tcgetattr { # $succeded ($fd, \%termios)
   $termios->{Oflag} = $term->getoflag();
   $termios->{Ispeed} = $term->getispeed();
   $termios->{Ospeed} = $term->getospeed();
-  my $field = 0;
-  foreach (@{ $termios->{Cc} }) {
+  for my $field ( 0 .. NCCS -1 ) {
     my $value = $term->getcc($field) // 0;
     $termios->{Cc}->[$field] = $value;
-  } continue { $field++ }
+  }
   return "0E0";
 }
 
@@ -1008,6 +1046,7 @@ sub extract_raw_event { # $succeded (\$data, \%event)
         : 0;
         ;
 
+  lock $inbuf;
   my $n = bytes::length($inbuf);
   if (!$n) {
     return FALSE;

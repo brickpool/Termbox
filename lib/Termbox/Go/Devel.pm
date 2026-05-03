@@ -8,7 +8,7 @@
 #   Copyright (C) 2014 Aurelien Jacobs <aurel@gnuage.org>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024,2025 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Devel;
@@ -23,7 +23,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.4');
+our $VERSION = version->declare('v0.3.5');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';

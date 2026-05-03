@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024,2025 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminal;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.4');
+our $VERSION = version->declare('v0.3.5');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -269,21 +269,23 @@ sub Init { # $errno ()
 
   threads->create(sub {
     use bytes;
-    my $buf = "\0" x 128;
+    my $buf = '';
     for (;;) {
       select: {
         case: $sigio->dequeue_nb() and do {
           for (;;) {
-            my $n = sysread(IN, $buf, 128) // 0;
-            my $err = $!+0;
-            if ($err == EAGAIN || $err == EWOULDBLOCK) {
+            my $n = sysread(IN, $buf, 128);
+            my $err = $! + 0;
+            if (!defined $n) {
+              last if $err == EAGAIN || $err == EWOULDBLOCK;
+            } elsif ($n == 0) {
               last;
             }
             select: {
               my $ie;
-              case: ($ie = input_event(substr($buf, 0, $n), $err)) and do {
+              case: ($ie = input_event($buf, $err)) and do {
                 $input_comm->enqueue($ie);
-                substr($buf, $n, 128) = "\0" x 128;
+                $buf = '';
               };
               case: $quit->dequeue_nb() and do {
                 return 0;
@@ -294,6 +296,9 @@ sub Init { # $errno ()
         case: $quit->dequeue_nb() and do {
           return 0;
         };
+        default: {
+          threads->yield();
+        }
       }
     }
   })->detach();
@@ -646,6 +651,7 @@ sub PollRawEvent { # \%event ($data)
         if ($ev->{err}) {
           return Event{Type => EventError, Err => $ev->{err}};
         }
+        lock $inbuf;
         $inbuf .= $ev->{data} // '';
         if (extract_raw_event($data, $event)) {
           return $event;
@@ -684,6 +690,7 @@ sub PollEvent { # \%Event ()
   $event->{Type} = EventKey;
   my $status = extract_event(\$inbuf, $event, TRUE);
   if ($event->{N} != 0) {
+    lock $inbuf;
     $inbuf = bytes::substr($inbuf, $event->{N});
   }
   if ($status == event_extracted) {
@@ -705,6 +712,7 @@ sub PollEvent { # \%Event ()
           return Event{Type => EventError, Err => $ev->{err}};
         }
 
+        lock $inbuf;
         $inbuf .= $ev->{data} // '';
         $status = extract_event(\$inbuf, $event, TRUE);
         if ($event->{N} != 0) {
@@ -721,6 +729,7 @@ sub PollEvent { # \%Event ()
         $esc_wait_timer = FALSE;
         $status = extract_event(\$inbuf, $event, FALSE);
         if ($event->{N} != 0) {
+          lock $inbuf;
           $inbuf = bytes::substr($inbuf, $event->{N});
         }
         if ($status == event_extracted) {

@@ -1,5 +1,15 @@
 Revision history for Termbox::Go
 
+0.003005
+        2026-05-03
+        - fix RGB Background Bug in Terminal
+        - fix get_term_size ioctl buffer and order
+        - fix processing of $inbuf; changed without a lock
+        - Change for Thread::Queue; :shared is not necessary
+        - Update WCWidth tables to 17.0.0
+        - Add threads->yield() to main loop
+        - Add Partial writes in flush
+
 0.003004
         2025-11-02
         - Change from error codes in Win32

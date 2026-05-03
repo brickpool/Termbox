@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024,2025 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Common;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.4');
+our $VERSION = version->declare('v0.3.5');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -680,18 +680,18 @@ our $keys  = [];
 our $funcs = [];
 
 # termbox inner state
-our $back_buffer            = bless {}, 'cellbuf';
-our $front_buffer           = bless {}, 'cellbuf';
-our $input_mode     :shared = InputEsc;
-our $output_mode            = OutputNormal;
-our $cursor_x               = cursor_hidden;
-our $cursor_y               = cursor_hidden;
-our $foreground             = ColorDefault;
-our $background             = ColorDefault;
-our $in                     = 0;
+our $back_buffer        = bless {}, 'cellbuf';
+our $front_buffer       = bless {}, 'cellbuf';
+our $input_mode :shared = InputEsc;
+our $output_mode        = OutputNormal;
+our $cursor_x           = cursor_hidden;
+our $cursor_y           = cursor_hidden;
+our $foreground         = ColorDefault;
+our $background         = ColorDefault;
+our $in                 = 0;
 our $out;
-our $input_comm     :shared = Thread::Queue->new();
-our $interrupt_comm :shared = Thread::Queue->new();
+our $input_comm         = Thread::Queue->new();
+our $interrupt_comm     = Thread::Queue->new();
 
 # ------------------------------------------------------------------------
 # Classes ----------------------------------------------------------------
