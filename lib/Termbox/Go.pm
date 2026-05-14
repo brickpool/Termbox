@@ -18,7 +18,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.5');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -29,7 +29,7 @@ our $AUTHORITY = 'github:brickpool';
 
 use Carp qw( croak );
 use English qw( -no_match_vars );
-use Import::into;
+use Import::Into;
 
 my %module = (
   darwin          => 'Terminal',
@@ -218,7 +218,7 @@ developed with high portability and interoperability.
 
 L<5.014|http://metacpan.org/release/DAPM/perl-5.14.4>
 
-L<Import::into> 
+L<Import::Into> 
 
 =head1 SEE ALSO
 

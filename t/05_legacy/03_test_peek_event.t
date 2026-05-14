@@ -1,6 +1,13 @@
 use 5.014;
 use warnings;
 
+$SIG{__WARN__} = sub {
+  my ($msg) = @_;
+  return if defined $msg
+    && $msg =~ /isn't numeric in numeric (?:eq|ne) \((?:==|!=)\) at .*?(?:Test2\/API\.pm|Test2\/Hub\.pm|Test\/Builder\.pm) line \d+\.?\n?\z/s;
+  warn @_;
+};
+
 use Test::More tests => 7;
 use Test::Exception;
 use Devel::StrictMode;

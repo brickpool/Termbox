@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_0');
-our $VERSION = version->declare('v0.3.5');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -1288,19 +1288,25 @@ sub wait_event { # $result (\%event, $timeout)
         ? $input_comm->dequeue_timed( $timeout / 1000 )
         : $input_comm->dequeue();
   } elsif ( $timeout >= 0 ) {
-    # General timeout implementation, but fragile
-    local $SIG{ALRM} = sub { "alarm\n" }; # supress '..no signal handler set.'
+    # General timeout implementation with explicit cancellation.
+    # Keep the helper thread joinable to avoid detached-thread side effects.
+    my $cancel = Thread::Queue->new();
     my $alarm = threads->create(
       sub {
-        local $SIG{ALRM} = sub { threads->exit };
-        Time::HiRes::sleep($timeout / 1000);
-        $termbox->Interrupt();
+        my ($delay, $cancel_q, $tb) = @_;
+        my $token = $cancel_q->dequeue_timed($delay);
+        if (!defined $token) {
+          $tb->Interrupt();
+        }
         return;
-      }
+      },
+      $timeout / 1000,
+      $cancel,
+      $termbox,
     );
-    $alarm->detach();
     $ev = $termbox->PollEvent();
-    $alarm->kill('ALRM');
+    $cancel->enqueue(1);
+    $alarm->join();
   } else {
     # No timeout, so simply call PollEvent
     $ev = $termbox->PollEvent();

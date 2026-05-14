@@ -1,5 +1,13 @@
 Revision history for Termbox::Go
 
+0.003006
+        2026-05-14
+        - fix fcntl return-value checks to use defined(fcntl(...))
+        - fix Init() F_SETOWN handling to use getpid()
+        - fix missing use Import::Into in Termbox::Go
+        - clean up legacy resize and peek_event tests
+        - note Test2/Test::Builder PID warning noise in ithreads tests
+
 0.003005
         2026-05-03
         - fix RGB Background Bug in Terminal

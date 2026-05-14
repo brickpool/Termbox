@@ -23,7 +23,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.5');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';

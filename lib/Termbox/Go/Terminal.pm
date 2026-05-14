@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.5');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -47,6 +47,7 @@ use Params::Util qw(
 use POSIX qw(
   :errno_h
   :termios_h
+  getpid
   !tcsetattr
   !tcgetattr
 );
@@ -198,7 +199,6 @@ sub Init { # $errno ()
       return $err;
     }
     $err = sysopen(IN, "/dev/tty", O_RDONLY, 0) ? 0 : $!+0;
-    $err = $!+0;
     if ($err != 0) {
       return $err;
     }
@@ -227,11 +227,11 @@ sub Init { # $errno ()
     $sigio->pending() or $sigio->enqueue(TRUE);
   };
 
-  $err = fcntl(IN, F_SETFL, O_ASYNC|O_NONBLOCK) ? 0 : $!+0;
+  $err = defined(fcntl(IN, F_SETFL, O_ASYNC|O_NONBLOCK)) ? 0 : $!+0;
   if ($err != 0) {
     return $err;
   }
-  $err = fcntl(IN, F_SETOWN, $PID) ? 0 : $!+0;
+  $err = defined(fcntl(IN, F_SETOWN, getpid())) ? 0 : $!+0;
   if ($OSNAME ne "darwin" && $err != 0) {
     return $err;
   }
