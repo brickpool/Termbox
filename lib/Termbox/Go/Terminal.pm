@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.5');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -47,6 +47,7 @@ use Params::Util qw(
 use POSIX qw(
   :errno_h
   :termios_h
+  getpid
   !tcsetattr
   !tcgetattr
 );
@@ -198,7 +199,6 @@ sub Init { # $errno ()
       return $err;
     }
     $err = sysopen(IN, "/dev/tty", O_RDONLY, 0) ? 0 : $!+0;
-    $err = $!+0;
     if ($err != 0) {
       return $err;
     }
@@ -231,7 +231,7 @@ sub Init { # $errno ()
   if ($err != 0) {
     return $err;
   }
-  $err = fcntl(IN, F_SETOWN, $PID) ? 0 : $!+0;
+  $err = fcntl(IN, F_SETOWN, getpid()) ? 0 : $!+0;
   if ($OSNAME ne "darwin" && $err != 0) {
     return $err;
   }
@@ -272,7 +272,11 @@ sub Init { # $errno ()
     my $buf = '';
     for (;;) {
       select: {
-        case: $sigio->dequeue_nb() and do {
+        case: $quit->dequeue_nb() and do {
+          return 0;
+        };
+        # Wait up to 20 millis for data
+        case: $sigio->dequeue_timed(20/1000) and do {
           for (;;) {
             my $n = sysread(IN, $buf, 128);
             my $err = $! + 0;
@@ -293,12 +297,6 @@ sub Init { # $errno ()
             }
           }
         };
-        case: $quit->dequeue_nb() and do {
-          return 0;
-        };
-        default: {
-          threads->yield();
-        }
       }
     }
   })->detach();
@@ -910,19 +908,19 @@ developed with high portability and interoperability.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -935,7 +933,7 @@ developed with high portability and interoperability.
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

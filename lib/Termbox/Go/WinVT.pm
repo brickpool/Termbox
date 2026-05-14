@@ -21,7 +21,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.5');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -63,6 +63,7 @@ use Termbox::Go::Common qw(
 use Termbox::Go::Devel qw(
   __FUNCTION__
   usage
+  DEBUG
 );
 use Termbox::Go::Terminal;
 use Termbox::Go::Terminal::Backend qw(
@@ -518,6 +519,7 @@ sub Init { # $errno ()
     my $hOutput = FdGetOsFHandle($outfd) // INVALID_HANDLE_VALUE;
     die($^E = ERROR_INVALID_HANDLE) if $hOutput == INVALID_HANDLE_VALUE;
     my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
+    my $logged_pipe_disk_fallback = FALSE;
     for (;;) {
       switch: for ($uFileType) {
         case: $_ == FILE_TYPE_CHAR and do {
@@ -541,6 +543,13 @@ sub Init { # $errno ()
           last;
         }; # case: $_ == FILE_TYPE_CHAR
         case: $_ == FILE_TYPE_DISK || $_ == FILE_TYPE_PIPE and do {
+          # Fallback path for redirected input handles (PIPE/DISK).
+          # TODO: This branch currently has limited direct test coverage.
+          if (STRICT and !$logged_pipe_disk_fallback) {
+            $logged_pipe_disk_fallback = TRUE;
+            DEBUG("WinVT: using FILE_TYPE_PIPE/DISK input fallback; ".
+              "test coverage is limited");
+          }
           if (peek_named_pipe($hInput)) {
             $sigio->pending() or $sigio->enqueue(TRUE);
           }
@@ -657,12 +666,17 @@ sub Init { # $errno ()
     use bytes;
     my $buf = "\0" x 128;
     input_event(substr($buf, 0, 0), $err);
+    my $logged_pipe_disk_fallback = FALSE;
     my $hInput = FdGetOsFHandle($in) // INVALID_HANDLE_VALUE;
     die($^E = ERROR_INVALID_HANDLE) if $hInput == INVALID_HANDLE_VALUE;
     my $uFileType = GetFileType($hInput) // FILE_TYPE_UNKNOWN;
     for (;;) {
       select: {
-        case: $sigio->dequeue_nb() and do {
+        case: $quit->dequeue_nb() and do {
+          return 0;
+        };
+        # Wait up to 20 millis for data
+        case: $sigio->dequeue_timed(20/1000) and do {
           # DEBUG('sigio dequeued');
           for (;;) {
             my $n = 0;
@@ -713,6 +727,13 @@ sub Init { # $errno ()
                 last;
               };
               case: $_ == FILE_TYPE_DISK || $_ == FILE_TYPE_PIPE and do {
+                # Fallback path for redirected input handles (PIPE/DISK).
+                # TODO: This branch currently has limited direct test coverage.
+                if (STRICT and !$logged_pipe_disk_fallback) {
+                  $logged_pipe_disk_fallback = TRUE;
+                  DEBUG("WinVT: using FILE_TYPE_PIPE/DISK input fallback; ".
+                    "test coverage is limited");
+                }
                 if (peek_named_pipe($hInput)) {
                   $n = POSIX::read($hInput, $buf, 128) 
                     // do { $^E ||= WSAEFAULT; 0 };
@@ -741,10 +762,7 @@ sub Init { # $errno ()
               };
             }
           } # for (;;)
-        }; # case: $sigio->dequeue_nb()
-        case: $quit->dequeue_nb() and do {
-          return 0;
-        };
+        }; # case: $sigio->dequeue_timed(20/1000)
       }
     } # for (;;)
   })->detach();
@@ -1020,22 +1038,56 @@ developed with high portability and interoperability.
 B<Note>: Windows Terminal still requires parts of the classic Console API, 
 e.g. to set the input or output mode and codepage.
 
+=head1 BACKEND SELECTION
+
+On Windows, C<Termbox::Go> selects C<Termbox::Go::WinVT> when
+C<WT_SESSION> is set. If C<WT_SESSION> is not set, it selects
+C<Termbox::Go::Win32>.
+
+  PS C:\> $env:WT_SESSION     # check if WT_SESSION is set
+  6361ae93-eabd-4e94-9523-54a64ee30ded
+  PS C:\> $env:WT_SESSION=""  # unset WT_SESSION
+
+=head1 BENCHMARK
+
+The following numbers are a single snapshot and not a full benchmark series.
+
+Method:
+
+=over
+
+=item * Measurement phase: 40 frames.
+
+=item * Per frame, all cells are written with C<SetCell()/Flush()>.
+
+=item * Workload limit: 80x24 cells (1920 cells per frame).
+
+=back
+
+Single-machine result (measured with Windows Version 10.0.26100.8246):
+
+  Backend              Impl                Time(s)  FPS    Cells/s
+  Win32 Console API    Termbox::Go::Win32  1.183    33.81  64907
+  WinVT                Termbox::Go::WinVT  2.340    17.10  32827
+
+In this run, Win32 was about twice as fast as WinVT.
+
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -1048,7 +1100,7 @@ e.g. to set the input or output mode and codepage.
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -1312,15 +1364,6 @@ Sync comes handy when something causes desync between termbox's understanding
 of a terminal buffer and the reality. Such as a third party process. Sync
 forces a complete resync between the termbox and a terminal, it may not be
 visually pretty though.
-
-
-=head2 get_term_size
-
- my ($cols, $rows) = get_term_size($fd);
-
-The call to Term::ReadKey::GetTerminalSize did not work if the handle was
-redirected or duplicated, so we need to mock the original
-Terminal::Backend::get_term_size() subroutine.
 
 
 =head2 peek_console_input

@@ -18,7 +18,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.5');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -29,7 +29,7 @@ our $AUTHORITY = 'github:brickpool';
 
 use Carp qw( croak );
 use English qw( -no_match_vars );
-use Import::into;
+use Import::Into;
 
 my %module = (
   darwin          => 'Terminal',
@@ -180,19 +180,19 @@ developed with high portability and interoperability.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -205,7 +205,7 @@ developed with high portability and interoperability.
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -218,7 +218,7 @@ developed with high portability and interoperability.
 
 L<5.014|http://metacpan.org/release/DAPM/perl-5.14.4>
 
-L<Import::into> 
+L<Import::Into> 
 
 =head1 SEE ALSO
 

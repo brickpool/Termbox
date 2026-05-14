@@ -1,5 +1,14 @@
 Revision history for Termbox::Go
 
+0.003006
+        2026-05-14
+        - fix Win32 tb_peek_event timeout path to map undef to EventNone
+        - fix Init() F_SETOWN handling to use getpid()
+        - fix missing use Import::Into in Termbox::Go
+        - Add timer to the thread's main loop (delete yield)
+        - clean up legacy resize and peek_event tests
+        - note Test2/Test::Builder PID warning noise in ithreads tests
+
 0.003005
         2026-05-03
         - fix RGB Background Bug in Terminal
