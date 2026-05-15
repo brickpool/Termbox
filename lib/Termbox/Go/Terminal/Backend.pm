@@ -1147,24 +1147,27 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
   # the only possible option is utf8
   my ($r, $n) = do {
     # Decode the first character (UTF-8 uses a maximum of 4-byte code points
-    # and 'utf8::decode' handles any - even incomplete - encoding)
-    utf8::decode(my $str = bytes::substr($$inbuf_ref, 0, 4));
-    my $r = substr($str, 0, 1);
-    my $n = utf8::upgrade($r);
-    ($r, $n);
+    my $first = bytes::substr($$inbuf_ref, 0, 4);
+    my ($seq) = $first =~ /\A(
+        [\x00-\x7F]                         # 1-byte (ASCII)
+      | [\xC2-\xDF][\x80-\xBF]              # 2-byte
+      | \xE0[\xA0-\xBF][\x80-\xBF]          # 3-byte, special E0
+      | [\xE1-\xEC\xEE-\xEF][\x80-\xBF]{2}  # 3-byte, normal range
+      | \xED[\x80-\x9F][\x80-\xBF]          # 3-byte, special ED
+      | \xF0[\x90-\xBF][\x80-\xBF]{2}       # 4-byte, special F0
+      | [\xF1-\xF3][\x80-\xBF]{3}           # 4-byte, normal range
+      | \xF4[\x80-\x8F][\x80-\xBF]{2}       # 4-byte, special F4 (max valid)
+    )/x;
+    defined $seq ? (ord($seq), bytes::length($seq)) : (undef, 0);
   };
-  if ($r && $n) {
-    $event->{Ch} = ord($r);
+  if (defined $r) {
+    $event->{Ch} = $r;
     $event->{Key} = 0;
     $event->{N} = $n;
     return event_extracted;
   }
 
-  # Match Go's rune fallback behavior: consume one byte and emit U+FFFD.
-  $event->{Ch} = 0xfffd;
-  $event->{Key} = 0;
-  $event->{N} = 1;
-  return event_extracted;
+  return event_not_extracted;
 }
 
 # from escwait.go/escwait_darwin.go

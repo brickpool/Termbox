@@ -303,8 +303,7 @@ sub setup_term { # $success ()
 
   my $header_len = scalar(@header) * $Config{i16size};
   $! = 0;
-  my $n = read($rd, my $buf, $header_len);
-  if (!defined($n) || $n != $header_len) {
+  if ((read($rd, my $buf, $header_len)//0) != $header_len) {
     $! ||= EIO;
     return;
   } else {

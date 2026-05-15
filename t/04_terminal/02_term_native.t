@@ -1,7 +1,7 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 18;
+use Test::More tests => 22;
 use Test::Exception;
 use POSIX qw( :fcntl_h );
 
@@ -14,6 +14,7 @@ use_ok 'Termbox::Go::Common', qw(
   :vars
 );
 use_ok 'Termbox::Go::Terminal::Backend', qw( 
+  :const
   :func
   :types
   :vars
@@ -63,5 +64,16 @@ lives_ok { extract_raw_event(\(my $data = '1'), my $event = {}) or die }
   'extract_raw_event';
 lives_ok { extract_event(\(my $data = ''), my $event = {}, !!1) }
   'extract_event';
+
+my $invalid_utf8 = "\xFF";
+my %invalid_event = ( Type => EventKey() );
+is(
+  extract_event(\$invalid_utf8, \%invalid_event, !!1),
+  event_not_extracted(),
+  'extract_event invalid UTF-8 status'
+);
+ok(!exists($invalid_event{Ch}), 'extract_event invalid UTF-8 keeps Ch unset');
+ok(!exists($invalid_event{N}), 'extract_event invalid UTF-8 keeps N unset');
+ok(!exists($invalid_event{Key}), 'extract_event invalid UTF-8 keeps Key unset');
 
 done_testing;

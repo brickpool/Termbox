@@ -1,5 +1,10 @@
 Revision history for Termbox::Go
 
+0.003008
+        2026-05-15
+        - fix sync changed cells back into front buffer during Flush (GH #4)
+        - change align UTF-8 decoding behavior in extract_event
+
 0.003007
         2026-05-15
         - Terminfo: keep Go-like errno flow; clear stale errno before reads
