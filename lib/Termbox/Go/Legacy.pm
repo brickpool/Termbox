@@ -1284,9 +1284,13 @@ sub wait_event { # $result (\%event, $timeout)
   map { $tb_event->{$_} = 0 } keys %{tb_event()};
   if ( $termbox eq 'Termbox::Go::Win32' ) {
     # We can use an Win32 optimized version here
-    $ev = $timeout >= 0
-        ? $input_comm->dequeue_timed( $timeout / 1000 )
-        : $input_comm->dequeue();
+    if ($timeout >= 0) {
+      $ev = $input_comm->dequeue_timed( $timeout / 1000 );
+      # If timeout, create EventNone event to return TB_ERR_NO_EVENT
+      $ev //= Event({ Type => EventNone });
+    } else {
+      $ev = $input_comm->dequeue();
+    }
   } elsif ( $timeout >= 0 ) {
     # General timeout implementation with explicit cancellation.
     # Keep the helper thread joinable to avoid detached-thread side effects.
@@ -1338,6 +1342,11 @@ sub wait_event { # $result (\%event, $timeout)
       $tb_event->{x}    = $ev->{MouseX};
       $tb_event->{y}    = $ev->{MouseY};
       return TB_OK;
+    };
+    case: EventNone == $_ and do {
+      # DEBUG("EventNone - Timeout");
+      $last_errno = $! = EAGAIN;
+      return TB_ERR_NO_EVENT;
     };
     case: EventInterrupt == $_ and do {
       # DEBUG("EventInterrupt");
@@ -1649,22 +1658,22 @@ Legacy Interface of Termbox based on termbox2 v2.5.0-dev, 9. Feb 2024.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
                2010-2020 nsf <no.smile.face@gmail.com>
                2015-2024,2025 Adam Saponara <as@php.net>
- 
+
  The content of the library was taken from termbox-go and the interface was 
  taken from the termbox2 implementation of Termbox, which is licensed under 
  the MIT license.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -1677,7 +1686,7 @@ Legacy Interface of Termbox based on termbox2 v2.5.0-dev, 9. Feb 2024.
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

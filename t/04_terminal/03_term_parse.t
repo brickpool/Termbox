@@ -24,8 +24,8 @@ lives_ok(
   }, 'UTF-8 (1005)'
 );
 @$expected{qw(Mod MouseX MouseY Key)}
-  = (0, 148, 39, MouseRelease());
-is_deeply $event, $expected, '148x39';
+  = (ModMotion(), 116, 7, MouseRelease());
+is_deeply $event, $expected, '116x7';
 
 lives_ok( 
   sub { 
