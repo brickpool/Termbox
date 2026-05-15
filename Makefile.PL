@@ -28,7 +28,7 @@ WriteMakefile1(
 
   TEST_REQUIRES => {
     'Test::Exception' => 0.31,
-    'Test::Simple'    => 1.302188,
+    'Test::More'      => 0.96,
   },
 
   META_MERGE => {
