@@ -9,7 +9,7 @@
 #                 2015 bluebear94 <tkook11@gmail.com>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::WCWidth;
@@ -24,7 +24,7 @@ use warnings;
 
 # version '...'
 use version;
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $AUTHORITY = 'github:brickpool';
@@ -201,19 +201,19 @@ method.
 =head1 COPYRIGHT AND LICENCE
 
  This code was originally derived from C code with the name wcwidth.c.
- 
+
  Copyright (c) 2007 by Markus Kuhn
- 
+
  This library content was taken from the Terminal::WCWidth implementation of 
  Perl 6 which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -223,12 +223,12 @@ method.
 
 =item * 2015 by bluebear94 E<lt>tkook11@gmail.comE<gt>
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

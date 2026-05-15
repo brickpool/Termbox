@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Common;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -680,18 +680,18 @@ our $keys  = [];
 our $funcs = [];
 
 # termbox inner state
-our $back_buffer            = bless {}, 'cellbuf';
-our $front_buffer           = bless {}, 'cellbuf';
-our $input_mode     :shared = InputEsc;
-our $output_mode            = OutputNormal;
-our $cursor_x               = cursor_hidden;
-our $cursor_y               = cursor_hidden;
-our $foreground             = ColorDefault;
-our $background             = ColorDefault;
-our $in                     = 0;
+our $back_buffer        = bless {}, 'cellbuf';
+our $front_buffer       = bless {}, 'cellbuf';
+our $input_mode :shared = InputEsc;
+our $output_mode        = OutputNormal;
+our $cursor_x           = cursor_hidden;
+our $cursor_y           = cursor_hidden;
+our $foreground         = ColorDefault;
+our $background         = ColorDefault;
+our $in                 = 0;
 our $out;
-our $input_comm     :shared = Thread::Queue->new();
-our $interrupt_comm :shared = Thread::Queue->new();
+our $input_comm         = Thread::Queue->new();
+our $interrupt_comm     = Thread::Queue->new();
 
 # ------------------------------------------------------------------------
 # Classes ----------------------------------------------------------------
@@ -899,19 +899,19 @@ the implementation of Termbox.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -919,12 +919,12 @@ the implementation of Termbox.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

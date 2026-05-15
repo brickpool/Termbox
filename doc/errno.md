@@ -46,9 +46,9 @@ use constant {
   TB_ERR_NO_TERM          => ENXIO,           # No such device or address.
   TB_ERR_NOT_INIT         => ECONNREFUSED,    # Connection refused.
   TB_ERR_OUT_OF_BOUNDS    => EOVERFLOW,       # Value too large.
-  TB_ERR_READ             => EBADMSG,	        # Bad message.
+  TB_ERR_READ             => EBADMSG,         # Bad message.
   TB_ERR_RESIZE_IOCTL     => ENOTTY,          # Inappropriate I/O control operation.
-  TB_ERR_RESIZE_PIPE      => EPIPE,	          # Broken pipe.
+  TB_ERR_RESIZE_PIPE      => EPIPE,           # Broken pipe.
   TB_ERR_RESIZE_SIGACTION => ECANCELED,       # Operation canceled.
   TB_ERR_POLL             => ENODATA,         # No message available.
   TB_ERR_TCGETATTR        => ENOPROTOOPT,     # No protocol option.

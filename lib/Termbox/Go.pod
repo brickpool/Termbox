@@ -277,7 +277,7 @@ L<Go termbox implementation|http://godoc.org/github.com/nsf/termbox-go>
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 

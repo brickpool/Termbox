@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminal;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -47,6 +47,7 @@ use Params::Util qw(
 use POSIX qw(
   :errno_h
   :termios_h
+  getpid
   !tcsetattr
   !tcgetattr
 );
@@ -198,7 +199,6 @@ sub Init { # $errno ()
       return $err;
     }
     $err = sysopen(IN, "/dev/tty", O_RDONLY, 0) ? 0 : $!+0;
-    $err = $!+0;
     if ($err != 0) {
       return $err;
     }
@@ -231,7 +231,7 @@ sub Init { # $errno ()
   if ($err != 0) {
     return $err;
   }
-  $err = fcntl(IN, F_SETOWN, $PID) ? 0 : $!+0;
+  $err = fcntl(IN, F_SETOWN, getpid()) ? 0 : $!+0;
   if ($OSNAME ne "darwin" && $err != 0) {
     return $err;
   }
@@ -269,30 +269,33 @@ sub Init { # $errno ()
 
   threads->create(sub {
     use bytes;
-    my $buf = "\0" x 128;
+    my $buf = '';
     for (;;) {
       select: {
-        case: $sigio->dequeue_nb() and do {
+        case: $quit->dequeue_nb() and do {
+          return 0;
+        };
+        # Wait up to 20 millis for data
+        case: $sigio->dequeue_timed(20/1000) and do {
           for (;;) {
-            my $n = sysread(IN, $buf, 128) // 0;
-            my $err = $!+0;
-            if ($err == EAGAIN || $err == EWOULDBLOCK) {
+            my $n = sysread(IN, $buf, 128);
+            my $err = $! + 0;
+            if (!defined $n) {
+              last if $err == EAGAIN || $err == EWOULDBLOCK;
+            } elsif ($n == 0) {
               last;
             }
             select: {
               my $ie;
-              case: ($ie = input_event(substr($buf, 0, $n), $err)) and do {
+              case: ($ie = input_event($buf, $err)) and do {
                 $input_comm->enqueue($ie);
-                substr($buf, $n, 128) = "\0" x 128;
+                $buf = '';
               };
               case: $quit->dequeue_nb() and do {
                 return 0;
               };
             }
           }
-        };
-        case: $quit->dequeue_nb() and do {
-          return 0;
         };
       }
     }
@@ -392,7 +395,7 @@ sub Flush { # $errno ()
         $x += $w;
         next;
       }
-      $front = { %$back };
+      $front_buffer->{cells}->[$cell_offset] = { %$back };
       send_attr($back->{Fg}, $back->{Bg});
 
       if ($w == 2 && $x == $front_buffer->{width} - 1) {
@@ -646,6 +649,7 @@ sub PollRawEvent { # \%event ($data)
         if ($ev->{err}) {
           return Event{Type => EventError, Err => $ev->{err}};
         }
+        lock $inbuf;
         $inbuf .= $ev->{data} // '';
         if (extract_raw_event($data, $event)) {
           return $event;
@@ -670,9 +674,10 @@ sub PollEvent { # \%Event ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
 
-  # Constant governing macOS specific behavior. See https://github.com/nsf/termbox-go/issues/132
-  # This is an arbitrary delay which hopefully will be enough time for any lagging
-  # partial escape sequences to come through.
+  # Constant governing macOS specific behavior. 
+  # See https://github.com/nsf/termbox-go/issues/132 This is an arbitrary delay 
+  # which hopefully will be enough time for any lagging partial escape 
+  # sequences to come through.
   use constant esc_wait_delay => 100/1000; # 100 ms
 
   my $event = Event();
@@ -683,6 +688,7 @@ sub PollEvent { # \%Event ()
   $event->{Type} = EventKey;
   my $status = extract_event(\$inbuf, $event, TRUE);
   if ($event->{N} != 0) {
+    lock $inbuf;
     $inbuf = bytes::substr($inbuf, $event->{N});
   }
   if ($status == event_extracted) {
@@ -704,6 +710,7 @@ sub PollEvent { # \%Event ()
           return Event{Type => EventError, Err => $ev->{err}};
         }
 
+        lock $inbuf;
         $inbuf .= $ev->{data} // '';
         $status = extract_event(\$inbuf, $event, TRUE);
         if ($event->{N} != 0) {
@@ -720,6 +727,7 @@ sub PollEvent { # \%Event ()
         $esc_wait_timer = FALSE;
         $status = extract_event(\$inbuf, $event, FALSE);
         if ($event->{N} != 0) {
+          lock $inbuf;
           $inbuf = bytes::substr($inbuf, $event->{N});
         }
         if ($status == event_extracted) {
@@ -900,19 +908,19 @@ developed with high portability and interoperability.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -920,12 +928,12 @@ developed with high portability and interoperability.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

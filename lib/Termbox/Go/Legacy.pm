@@ -8,7 +8,7 @@
 #                 2015-2024 Adam Saponara <as@php.net>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Legacy;
@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.5.0_0');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -64,7 +64,7 @@ use Termbox::Go::Devel qw(
 );
 use Termbox::Go::Common qw(
   :all 
-  !:types
+  !Cell
 );
 
 my %module = (
@@ -871,6 +871,21 @@ BEGIN {
 
 =cut
 
+q/*
+use Termbox::Go::Devel qw( :all );
+sub termbox::DebugHandler {    # void ($fmt, @args)
+  my ( $fmt, @args ) = @_;
+  if ( $^O eq 'MSWin32' ) {
+    require Win32;
+    Win32::OutputDebugString( sprintf( $fmt, @args ) );
+  }
+  else {
+    STDERR->printf( $fmt, @args );
+  }
+  return;
+}
+*/ if 0;
+
 # ------------------------------------------------------------------------
 # Functions --------------------------------------------------------------
 # ------------------------------------------------------------------------
@@ -944,7 +959,6 @@ sub tb_width { # $rows ()
     die;
   }
   return $rows;
-
 }
 
 # Returns the height of the internal back buffer (which is the same as terminal's
@@ -1255,6 +1269,97 @@ sub tb_set_output_mode { # $result ($mode)
   return $rv;
 }
 
+sub wait_event { # $result (\%event, $timeout)
+  my ($tb_event, $timeout) = @_;
+  croak(usage("$!", __FILE__, __FUNCTION__)) if
+    $!  = @_ < 2                      ? EINVAL
+        : @_ > 2                      ? E2BIG
+        : !tb_event($tb_event)        ? EINVAL
+        : !defined(_NUMBER($timeout)) ? EINVAL
+        : $timeout - int($timeout)    ? EINVAL
+        : undef
+        ;
+
+  my $ev;
+  map { $tb_event->{$_} = 0 } keys %{tb_event()};
+  if ( $termbox eq 'Termbox::Go::Win32' ) {
+    # We can use an Win32 optimized version here
+    if ($timeout >= 0) {
+      $ev = $input_comm->dequeue_timed( $timeout / 1000 );
+      # If timeout, create EventNone event to return TB_ERR_NO_EVENT
+      $ev //= Event({ Type => EventNone });
+    } else {
+      $ev = $input_comm->dequeue();
+    }
+  } elsif ( $timeout >= 0 ) {
+    # General timeout implementation with explicit cancellation.
+    # Keep the helper thread joinable to avoid detached-thread side effects.
+    my $cancel = Thread::Queue->new();
+    my $alarm = threads->create(
+      sub {
+        my ($delay, $cancel_q, $tb) = @_;
+        my $token = $cancel_q->dequeue_timed($delay);
+        if (!defined $token) {
+          $tb->Interrupt();
+        }
+        return;
+      },
+      $timeout / 1000,
+      $cancel,
+      $termbox,
+    );
+    $ev = $termbox->PollEvent();
+    $cancel->enqueue(1);
+    $alarm->join();
+  } else {
+    # No timeout, so simply call PollEvent
+    $ev = $termbox->PollEvent();
+  }
+
+  switch: for ($ev->{Type} // -1) {
+    case: EventKey == $_ and do {
+      # DEBUG_FMT("EventKey:%s", "@{[%$ev]}");
+      $tb_event->{type} = TB_EVENT_KEY;
+      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
+      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
+      $tb_event->{key}  = $ev->{Key};
+      $tb_event->{ch}   = $ev->{Ch};
+      return TB_OK;
+    };
+    case: EventResize == $_ and do {
+      # DEBUG_FMT("EventResize:%s", "@{[%$ev]}");
+      $tb_event->{type} = TB_EVENT_RESIZE;
+      $tb_event->{w}    = $ev->{Width};
+      $tb_event->{h}    = $ev->{Height};
+      return TB_OK;
+    };
+    case: EventMouse == $_ and do {
+      # DEBUG_FMT("EventMouse:%s", "@{[%$ev]}");
+      $tb_event->{type} = TB_EVENT_MOUSE;
+      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
+      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
+      $tb_event->{key}  = $ev->{Key};
+      $tb_event->{x}    = $ev->{MouseX};
+      $tb_event->{y}    = $ev->{MouseY};
+      return TB_OK;
+    };
+    case: EventNone == $_ and do {
+      # DEBUG("EventNone - Timeout");
+      $last_errno = $! = EAGAIN;
+      return TB_ERR_NO_EVENT;
+    };
+    case: EventInterrupt == $_ and do {
+      # DEBUG("EventInterrupt");
+      $last_errno = $! = EINTR;
+      return TB_ERR_NO_EVENT;
+    };
+    default: {
+      $last_errno = $! = EAGAIN;
+      return TB_ERR_POLL;
+    }
+  }
+}
+
 # Wait for an event up to timeout_ms milliseconds and fill the event structure
 # with it. If no event is available within the timeout period, TB_ERR_NO_EVENT
 # is returned. On a resize event, the underlying C<select> call may be
@@ -1272,21 +1377,10 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
         ;
 
   return TB_ERR_NOT_INIT if not $IsInit;
-  my $ev;
+  my $rv;
   local $@;
   try: eval {
-    local $SIG{ALRM} = sub { "alarm\n" }; # supress '...no signal handler set.'
-    my $alarm = threads->create(
-      sub {
-        local $SIG{ALRM} = sub { threads->exit };
-        Time::HiRes::sleep($timeout_ms / 1000);
-        $termbox->Interrupt();
-        return;
-      }
-    );
-    $alarm->detach();
-    $ev = $termbox->PollEvent();
-    $alarm->kill('ALRM');
+    $rv = wait_event($tb_event, $timeout_ms);
     1;
   } // ($@ ||= 'Died');
   catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
@@ -1296,41 +1390,7 @@ sub tb_peek_event { # $result (\%event, $timeout_ms)
   catch: if ($@) {
     die;
   }
-  map { $tb_event->{$_} = 0 } keys %{tb_event()};
-  switch: for ($ev->{Type} // -1) {
-    # STDERR->say("@{[%$ev]}");
-    case: EventKey == $_ and do {
-      $tb_event->{type} = TB_EVENT_KEY;
-      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
-      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
-      $tb_event->{key}  = $ev->{Key};
-      $tb_event->{ch}   = $ev->{Ch};
-      return TB_OK;
-    };
-    case: EventResize == $_ and do {
-      $tb_event->{type} = TB_EVENT_RESIZE;
-      $tb_event->{w}    = $ev->{Width};
-      $tb_event->{h}    = $ev->{Height};
-      return TB_OK;
-    };
-    case: EventMouse == $_ and do {
-      $tb_event->{type} = TB_EVENT_MOUSE;
-      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
-      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
-      $tb_event->{key}  = $ev->{Key};
-      $tb_event->{x}    = $ev->{MouseX};
-      $tb_event->{y}    = $ev->{MouseY};
-      return TB_OK;
-    };
-    case: EventInterrupt == $_ and do {
-      $last_errno = $! = EINTR;
-      return TB_ERR_NO_EVENT;
-    };
-    default: {
-      $last_errno = $! = EAGAIN;
-      return TB_ERR_POLL;
-    }
-  }
+  return $rv;
 }
 
 # Same as tb_peek_event except no timeout.
@@ -1344,10 +1404,10 @@ sub tb_poll_event { # $result (\%event)
         ;
 
   return TB_ERR_NOT_INIT if not $IsInit;
-  my $ev;
+  my $rv;
   local $@;
   try: eval {
-    $ev = $termbox->PollEvent();
+    $rv = wait_event($tb_event, -1);
     1;
   } // ($@ ||= 'Died');
   catch: if ($@ and $!+0 == EINVAL || $!+0 == E2BIG) {
@@ -1357,41 +1417,7 @@ sub tb_poll_event { # $result (\%event)
   catch: if ($@) {
     die;
   }
-  map { $tb_event->{$_} = 0 } keys %{tb_event()};
-  switch: for ($ev->{Type} // -1) {
-    # STDERR->say("@{[%$ev]}");
-    case: EventKey == $_ and do {
-      $tb_event->{type} = TB_EVENT_KEY;
-      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
-      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
-      $tb_event->{key}  = $ev->{Key};
-      $tb_event->{ch}   = $ev->{Ch};
-      return TB_OK;
-    };
-    case: EventResize == $_ and do {
-      $tb_event->{type} = TB_EVENT_RESIZE;
-      $tb_event->{w}    = $ev->{Width};
-      $tb_event->{h}    = $ev->{Height};
-      return TB_OK;
-    };
-    case: EventMouse == $_ and do {
-      $tb_event->{type} = TB_EVENT_MOUSE;
-      $tb_event->{mod} |= TB_MOD_ALT    if $ev->{Mod} & ModAlt;
-      $tb_event->{mod} |= TB_MOD_MOTION if $ev->{Mod} & ModMotion;
-      $tb_event->{key}  = $ev->{Key};
-      $tb_event->{x}    = $ev->{MouseX};
-      $tb_event->{y}    = $ev->{MouseY};
-      return TB_OK;
-    };
-    case: EventInterrupt == $_ and do {
-      $last_errno = $! = EINTR;
-      return TB_ERR_NO_EVENT;
-    };
-    default: {
-      $last_errno = $! = EAGAIN;
-      return TB_ERR_POLL;
-    }
-  }
+  return $rv;
 }
 
 # Print function. For finer control, use L</tb_set_cell>.
@@ -1632,22 +1658,22 @@ Legacy Interface of Termbox based on termbox2 v2.5.0-dev, 9. Feb 2024.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
                2010-2020 nsf <no.smile.face@gmail.com>
-               2015-2024 Adam Saponara <as@php.net>
- 
+               2015-2024,2025 Adam Saponara <as@php.net>
+
  The content of the library was taken from termbox-go and the interface was 
  taken from the termbox2 implementation of Termbox, which is licensed under 
  the MIT license.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
- 
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -1655,12 +1681,12 @@ Legacy Interface of Termbox based on termbox2 v2.5.0-dev, 9. Feb 2024.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

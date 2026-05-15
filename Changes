@@ -1,6 +1,54 @@
 Revision history for Termbox::Go
 
-0.003_001
+0.003008
+        2026-05-15
+        - fix sync changed cells back into front buffer during Flush (GH #4)
+        - change align UTF-8 decoding behavior in extract_event
+
+0.003007
+        2026-05-15
+        - Terminfo: keep Go-like errno flow; clear stale errno before reads
+        - Terminfo: make builtin compatibility matching deterministic
+        - Terminfo: harden binary parse for short reads/EOF; set EIO
+        - Terminal::Backend: align X10 mouse decode to Go Cb/Cx/Cy offsets
+        - Terminal::Backend: extract_raw_event no-op on empty dst buffer
+        - Terminal::Backend: guard flush on zero-byte writes (loop safety)
+        - Terminal::Backend: invalid UTF-8 -> U+FFFD, consume 1 byte
+        - Tests: update terminal parse expectations for Go X10 decoding
+
+0.003006
+        2026-05-14
+        - fix Win32 tb_peek_event timeout path to map undef to EventNone
+        - fix Init() F_SETOWN handling to use getpid()
+        - fix missing use Import::Into in Termbox::Go
+        - Add timer to the thread's main loop (delete yield)
+        - clean up legacy resize and peek_event tests
+        - note Test2/Test::Builder PID warning noise in ithreads tests
+
+0.003005
+        2026-05-03
+        - fix RGB Background Bug in Terminal
+        - fix get_term_size ioctl buffer and order
+        - fix processing of $inbuf; changed without a lock
+        - Change for Thread::Queue; :shared is not necessary
+        - Update WCWidth tables to 17.0.0
+        - Add threads->yield() to main loop
+        - Add Partial writes in flush
+
+0.003004
+        2025-11-02
+        - Change from error codes in Win32
+
+0.003003
+        2025-05-14
+        - Change Legacy function tb_peek_event for Win32
+
+0.003002
+        2025-04-30
+        - fix SIGIO Windows VT handling
+        - fix padding of EventType in INPUT_RECORD
+
+0.003001
         2024-06-17
         - Encapsulation of the Win32::API imports
         - fix Terminal Unicode support
@@ -12,7 +60,7 @@ Revision history for Termbox::Go
 0.002   2024-05-31
         - Add Terminal support
 
-0.001_001
+0.001001
         2024-05-16
         - Upload to github
         - Publication of the first release

@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminal::Backend;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -207,6 +207,15 @@ our %EXPORT_TAGS = (
 }
 
 # ------------------------------------------------------------------------
+# Constants --------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+# Use NCCS (if available); otherwise, read at least 32 fields.
+if (!eval { &POSIX::NCCS }) {
+  *NCCS = sub () { 32 };
+}
+
+# ------------------------------------------------------------------------
 # Types ------------------------------------------------------------------
 # ------------------------------------------------------------------------
 
@@ -306,7 +315,7 @@ sub syscall_Termios { # \%|undef (|@|\%)
     Oflag     => 0,
     Cflag     => 0,
     Lflag     => 0,
-    Cc        => [],
+    Cc        => [ (0) x NCCS ],
     Ispeed    => 0,
     Ospeed    => 0,
   };
@@ -358,19 +367,19 @@ use constant {
 # ------------------------------------------------------------------------
 
 # termbox inner state
-our $orig_tios        = syscall_Termios();
-our $termw            = 0;
-our $termh            = 0;
-our $outfd            = 0;
-our $lastfg           = attr_invalid;
-our $lastbg           = attr_invalid;
-our $lastx            = coord_invalid;
-our $lasty            = coord_invalid;
-our $inbuf    :shared = '';
-our $outbuf;            open($outbuf, "+>", \my $outstr);
-our $sigwinch :shared = $_ = Thread::Queue->new(); $_->limit(1);
-our $sigio    :shared = $_ = Thread::Queue->new(); $_->limit(1);
-our $quit     :shared = Thread::Queue->new();
+our $orig_tios     = syscall_Termios();
+our $termw         = 0;
+our $termh         = 0;
+our $outfd         = 0;
+our $lastfg        = attr_invalid;
+our $lastbg        = attr_invalid;
+our $lastx         = coord_invalid;
+our $lasty         = coord_invalid;
+our $inbuf :shared = '';
+our $outbuf;         open($outbuf, "+>", \my $outstr);
+our $sigwinch      = Thread::Queue->new(); $sigwinch->limit(1);
+our $sigio         = Thread::Queue->new(); $sigio->limit(1);
+our $quit          = Thread::Queue->new();
 
 # grayscale indexes
 our $grayscale = [
@@ -457,7 +466,7 @@ sub write_sgr_bg { # void ($a)
     };
     case: $_ == OutputRGB && do {
       my ($r, $g, $b) = AttributeToRGB($a);
-      $outbuf->print(escapeRGB(TRUE, $r, $g, $b));
+      $outbuf->print(escapeRGB(FALSE, $r, $g, $b));
       last;
     };
     default: {
@@ -561,18 +570,38 @@ sub get_term_size { # $cols, $rows ($fd)
         ;
 
   my ($col, $row);
-  my $fh = IO::File->new_from_fd($fd, 'w')
-    or return;
   local $@;
-  if (eval { require Term::ReadKey }) {
-    # This is more portable than the raw ioctl
+  if (eval { require Win32::Console; require Win32API::File }) {
+    my $h = Win32API::File::FdGetOsFHandle($fd) // -1;
+    if ($h != -1) {
+      ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($h);
+    }
+  } elsif (eval { require 'sys/ioctl.ph' }) {
+    my $fh = IO::File->new_from_fd($fd, 'w');
+    if (-t $fh) {
+      my $sz = pack('S4', 0,0,0,0);
+      if ( ioctl($fh, &TIOCGWINSZ, $sz) ) {
+        ($row, $col) = unpack('S4', $sz);
+      }
+    }
+  } elsif (eval { require Term::ReadKey }) {
+    my $fh = IO::File->new_from_fd($fd, 'w');
     ($col, $row) = Term::ReadKey::GetTerminalSize($fh);
-  } elsif (exists &TIOCGWINSZ) {
-    ioctl($fh, &TIOCGWINSZ, my $sz = '');
-    ($col, $row) = unpack('S2', $sz);
   }
   if (!$col || !$row) {
-    $! = ENOTTY;
+    if (-t STDIN) {
+      # -a is POSIX, --all is not
+      local $_ = '' . `stty -a 2>/dev/null`;
+      if (m/(?:;\s*rows\s+(\d+);|;\s*(\d+)\s+rows;)/) {
+        $row = $1 ? $1 : $2 ? $2 : 0;
+      }
+      if (m/(?:;\s*columns\s+(\d+);|;\s*(\d+)\s+columns;)/) {
+        $col = $1 ? $1 : $2 ? $2 : 0;
+      }
+    }
+  }
+  if (!$col || !$row) {
+    $! ||= ENOTTY;
     return;
   }
   return ($col, $row);
@@ -678,7 +707,7 @@ sub send_attr { # void ($fg, $bg)
   if ($fg & AttrDim) {
     $outbuf->print($funcs->[t_dim]);
   }
-  if ($fg & AttrReverse | $bg & AttrReverse) {
+  if (($fg & AttrReverse) || ($bg & AttrReverse)) {
     $outbuf->print($funcs->[t_reverse])
   }
 
@@ -694,6 +723,7 @@ sub send_char { # void ($x, $y, $ch)
         : !defined(_NONNEGINT($x))  ? EINVAL
         : !defined(_NONNEGINT($y))  ? EINVAL
         : !defined(_STRING($ch))    ? EINVAL
+        : !length($ch)              ? EINVAL
         : 0;
         ;
 
@@ -710,11 +740,26 @@ sub flush { # $succeded ()
     $! = @_ ? E2BIG : 0;
 
   $outbuf->flush();
-  my $err = defined(syswrite($out, $outstr)) ? 0 : $!+0;
+  my $buf = $outstr;
   $outbuf->seek(0, 0);
-  $err ||= $!+0;
   $outstr = '';
-  return $err ? undef : "0E0";
+
+  my $len = length($buf);
+  my $off = 0;
+
+  while ($off < $len) {
+    my $n = syswrite($out, $buf, $len - $off, $off);
+    if (!defined $n) {
+      return;
+    }
+    if ($n == 0) {
+      $! ||= EIO;
+      return;
+    }
+    $off += $n;
+  }
+
+  return "0E0";
 }
 
 sub send_clear { # $succeded ()
@@ -822,11 +867,10 @@ sub tcgetattr { # $succeded ($fd, \%termios)
   $termios->{Oflag} = $term->getoflag();
   $termios->{Ispeed} = $term->getispeed();
   $termios->{Ospeed} = $term->getospeed();
-  my $field = 0;
-  foreach (@{ $termios->{Cc} }) {
+  for my $field ( 0 .. NCCS -1 ) {
     my $value = $term->getcc($field) // 0;
     $termios->{Cc}->[$field] = $value;
-  } continue { $field++ }
+  }
   return "0E0";
 }
 
@@ -844,7 +888,7 @@ sub parse_mouse_event { # $count, $succeded (\%event, $buf)
   if ($buf =~ /^\033\[M/ && length($buf) >= 6) {
     # X10 mouse encoding, the simplest one
     # \033 [ M Cb Cx Cy
-    my $b = ord(substr($buf, 3, 1));
+    my $b = ord(substr($buf, 3, 1)) - 32;
     switch: for ($b & 3) {
       case: $_ == 0 and do {
         if ($b & 64) {
@@ -881,8 +925,8 @@ sub parse_mouse_event { # $count, $succeded (\%event, $buf)
     }
 
     # the coord is 1,1 for upper left
-    $event->{MouseX} = ord(substr($buf, 4, 1)) - 1;
-    $event->{MouseY} = ord(substr($buf, 5, 1)) - 1;
+    $event->{MouseX} = ord(substr($buf, 4, 1)) - 1 - 32;
+    $event->{MouseY} = ord(substr($buf, 5, 1)) - 1 - 32;
     return (6, TRUE);
   } elsif ($buf =~ /^\033\[<?/) {
     # xterm 1006 extended mode or urxvt 1015 extended mode
@@ -1004,14 +1048,17 @@ sub extract_raw_event { # $succeded (\$data, \%event)
         : 0;
         ;
 
-  my $n = bytes::length($inbuf);
-  if (!$n) {
+  lock $inbuf;
+  my $avail = bytes::length($inbuf);
+  if (!$avail) {
     return FALSE;
   }
 
-  if (my $size = bytes::length($$data)) {
-    $n = $size if $size < $n;
+  my $n = bytes::length($$data);
+  if ($n == 0) {
+    return FALSE;
   }
+  $n = $avail if $avail < $n;
 
   $$data = bytes::substr($inbuf, 0, $n);
   $inbuf = bytes::substr($inbuf, $n);
@@ -1100,14 +1147,21 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
   # the only possible option is utf8
   my ($r, $n) = do {
     # Decode the first character (UTF-8 uses a maximum of 4-byte code points
-    # and 'utf8::decode' handles any - even incomplete - encoding)
-    utf8::decode(my $str = bytes::substr($$inbuf_ref, 0, 4));
-    my $r = substr($str, 0, 1);
-    my $n = utf8::upgrade($r);
-    ($r, $n);
+    my $first = bytes::substr($$inbuf_ref, 0, 4);
+    my ($seq) = $first =~ /\A(
+        [\x00-\x7F]                         # 1-byte (ASCII)
+      | [\xC2-\xDF][\x80-\xBF]              # 2-byte
+      | \xE0[\xA0-\xBF][\x80-\xBF]          # 3-byte, special E0
+      | [\xE1-\xEC\xEE-\xEF][\x80-\xBF]{2}  # 3-byte, normal range
+      | \xED[\x80-\x9F][\x80-\xBF]          # 3-byte, special ED
+      | \xF0[\x90-\xBF][\x80-\xBF]{2}       # 4-byte, special F0
+      | [\xF1-\xF3][\x80-\xBF]{3}           # 4-byte, normal range
+      | \xF4[\x80-\x8F][\x80-\xBF]{2}       # 4-byte, special F4 (max valid)
+    )/x;
+    defined $seq ? (ord($seq), bytes::length($seq)) : (undef, 0);
   };
-  if ($r && $n) {
-    $event->{Ch} = ord($r);
+  if (defined $r) {
+    $event->{Ch} = $r;
     $event->{Key} = 0;
     $event->{N} = $n;
     return event_extracted;
@@ -1122,8 +1176,8 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
 # key was pressed, to account for partially send escape sequences, especially
 # with regard to lengthy mouse sequences.
 # See L<https://github.com/nsf/termbox-go/issues/132>
-sub enable_wait_for_escape_sequence { # $ ()
-	return $OSNAME eq 'darwin';
+sub enable_wait_for_escape_sequence() { # $ ()
+	$OSNAME eq 'darwin';
 }
 
 1;
@@ -1142,19 +1196,19 @@ Termbox for Terminal.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
-    
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -1162,12 +1216,12 @@ Termbox for Terminal.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

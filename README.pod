@@ -90,7 +90,7 @@ B<Termbox::Go> is a port of L<termbox-go|https://github.com/nsf/termbox-go>.
 
 =over
 
-=item * 2024 J. Schneider E<lt>L<http://github.com/brickpool>E<gt>
+=item * 2024,2025 J. Schneider E<lt>L<http://github.com/brickpool>E<gt>
 
 =back
 

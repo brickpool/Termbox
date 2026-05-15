@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author => 2024 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Terminfo;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -207,6 +207,7 @@ sub ti_try_path { # \$data|undef ($path)
 
   # first try, the typical *nix path
   my $terminfo = $path . "/" . substr($term, 0, 1) . "/" . $term;
+  $! = 0;
   my $data = eval { # ReadFile
     use autodie;
     local $/; # enable localized slurp mode
@@ -221,6 +222,7 @@ sub ti_try_path { # \$data|undef ($path)
 
   # fallback to darwin specific dirs structure
   $terminfo = $path . "/" . sprintf("%x", ord($term)) . "/" . $term;
+  $! = 0;
   $data = eval { # ReadFile
     use autodie;
     local $/; # enable localized slurp mode
@@ -255,44 +257,23 @@ sub setup_term_builtin { # $success ()
     return "0E0";
   }
 
-  state $compat_table = {
-    "xterm" => {
-      keys    => $xterm_keys,
-      funcs   => $xterm_funcs,
-    },
-    "rxvt" => {
-      keys    => $rxvt_unicode_keys, 
-      funcs   => $rxvt_unicode_funcs,
-    },
-    "linux" => {
-      keys    => $linux_keys,
-      funcs   => $linux_funcs,
-    },
-    "Eterm" => {
-      keys    => $eterm_keys,
-      funcs   => $eterm_funcs,
-    },
-    "screen" => {
-      keys    => $screen_keys,
-      funcs   => $screen_funcs,
-    },
+  state $compat_table = [
+    ["xterm",  $xterm_keys,        $xterm_funcs],
+    ["rxvt",   $rxvt_unicode_keys, $rxvt_unicode_funcs],
+    ["linux",  $linux_keys,        $linux_funcs],
+    ["Eterm",  $eterm_keys,        $eterm_funcs],
+    ["screen", $screen_keys,       $screen_funcs],
     # let's assume that 'cygwin' is xterm compatible
-    "cygwin" => {
-      keys    => $xterm_keys,
-      funcs   => $xterm_funcs,
-    },
-    "st" => {
-      keys    => $xterm_keys,
-      funcs   => $xterm_funcs,
-    },
-  };
+    ["cygwin", $xterm_keys,        $xterm_funcs],
+    ["st",     $xterm_keys,        $xterm_funcs],
+  ];
 
   # try compatibility variants
-  foreach (keys %$compat_table) {
-    if (index($name, $_) != -1) {
-      my $it = $compat_table->{$_};
-      $keys = $it->{keys};
-      $funcs = $it->{funcs};
+  foreach my $it (@$compat_table) {
+    my ($partial, $k, $f) = @$it;
+    if (index($name, $partial) != -1) {
+      $keys = $k;
+      $funcs = $f;
       return "0E0";
     }
   }
@@ -320,8 +301,10 @@ sub setup_term { # $success ()
   # size of numbers section (in integers), 4: size of the strings section (in
   # integers), 5: size of the string table
 
-  read($rd, my $buf, scalar(@header)*$Config{i16size});
-  if ($!) {
+  my $header_len = scalar(@header) * $Config{i16size};
+  $! = 0;
+  if ((read($rd, my $buf, $header_len)//0) != $header_len) {
+    $! ||= EIO;
     return;
   } else {
     @header = unpack('v*', $buf);
@@ -338,12 +321,14 @@ sub setup_term { # $success ()
     # old quirk to align everything on word boundaries
     $header[2] += 1;
   }
-  $str_offset = ti_header_length + $header[1] + $header[2] + $number_sec_len*$header[3];
+  $str_offset = ti_header_length + $header[1] + $header[2] 
+    + $number_sec_len*$header[3];
   $table_offset = $str_offset + 2*$header[4];
 
   $keys = [];
   for my $i (0 .. 0xffff - key_min -1) {
-    $keys->[$i] = ti_read_string($rd, $str_offset+2*$ti_keys->[$i], $table_offset);
+    $keys->[$i] = ti_read_string($rd, $str_offset+2*$ti_keys->[$i], 
+      $table_offset);
     if ($!) {
       return;
     }
@@ -352,7 +337,8 @@ sub setup_term { # $success ()
   # the last two entries are reserved for mouse. because the table offset is
   # not there, the two entries have to fill in manually
   for my $i (0 .. t_max_funcs - 2 -1) {
-    $funcs->[$i] = ti_read_string($rd, $str_offset+2*$ti_funcs->[$i], $table_offset);
+    $funcs->[$i] = ti_read_string($rd, $str_offset+2*$ti_funcs->[$i], 
+      $table_offset);
     if ($!) {
       return;
     }
@@ -377,24 +363,28 @@ sub ti_read_string { # $string ($rd, $str_off, $table)
 
   my $off;
 
+  $! = 0;
   seek($rd, $str_off, 0);
   if ($!) {
     return "";
   }
-  read($rd, my $buf, $Config{i16size});
-  if ($!) {
+  $! = 0;
+  if ((read($rd, my $buf, $Config{i16size})//0) != $Config{i16size}) {
+    $! ||= EIO;
     return "";
   } else {
     ($off) = unpack('v', $buf);
   }
+  $! = 0;
   seek($rd, $table + $off, 0);
   if ($!) {
     return "";
   }
   my $bs = '';
   for (;;) {
-    read($rd, $b, $Config{u8size});
-    if ($!) {
+    $! = 0;
+    if (read($rd, $b, $Config{u8size}//0) != $Config{u8size}) {
+      $! ||= EIO;
       return "";
     }
     if ($b eq "\0") {
@@ -421,19 +411,19 @@ Termbox for *nix.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
-    
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -441,12 +431,12 @@ Termbox for *nix.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL

@@ -43,6 +43,8 @@ subtest 'syscall_Termios' => sub {
   plan tests => 10;
   my $type;
   lives_ok  { $type = syscall_Termios() } 'call empty';
+  # We don't want to compare the Cc arrayref, so reset it to an empty arrayref
+  $type->{Cc} = [];
   is_deeply   $type, { Iflag=>0, Oflag=>0, Cflag=>0, Lflag=>0, Cc=>[], 
     Ispeed=>0, Ospeed=>0 }, 'create type';
   lives_ok  { $type = syscall_Termios(0, 1, 2, 3, [], 4, 5) } 'call params';

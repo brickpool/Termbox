@@ -7,7 +7,7 @@
 #   Copyright (C) 2012 termbox-go authors
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::Go::Win32::Backend;
@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.1');
+our $VERSION = version->declare('v0.3.6');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -582,12 +582,11 @@ sub diff_msg { # \%|undef (|@|\%)
 
 # Windows Error Codes
 use constant {
-  ERROR_INVALID_HANDLE => 0x6,
-  ERROR_INVALID_DATA => 0xd,
+  ERROR_INVALID_HANDLE    => 0x6,
+  ERROR_INVALID_DATA      => 0xd,
+  ERROR_GEN_FAILURE       => 0x1f,
   ERROR_INVALID_PARAMETER => 0x57,
-  ERROR_BAD_ARGUMENTS => 0xa0,
-  ERROR_INVALID_CRUNTIME_PARAMETER => 0x508,
-  WSAEINVAL => 0x2726,
+  ERROR_BAD_ARGUMENTS     => 0xa0,
 };
 
 # Event types
@@ -600,22 +599,22 @@ use constant {
 # ReadConsoleInput
 use constant {
   # INPUT_RECORD
-  wEventType        => 0,
+  wEventType          => 0,
   # KEY_EVENT_RECORD
-  bKeyDown          => 1,
-  wRepeatCount      => 2,
-  wVirtualKeyCode   => 3,
-  wVirtualScanCode  => 4,
-  UnicodeChar       => 5,
-  AsciiChar         => 5,
-  dwControlKeyState => 6,
+  bKeyDown            => 1,
+  wRepeatCount        => 2,
+  wVirtualKeyCode     => 3,
+  wVirtualScanCode    => 4,
+  UnicodeChar         => 5,
+  AsciiChar           => 5,
+  dwControlKeyState   => 6,
   # MOUSE_EVENT_RECORD
-  dwMousePosition   => 1,
-  dwButtonState     => 2,
-  dwControlKeyState => 3,
-  dwEventFlags      => 4,
+  dwMousePosition     => 1,
+  dwButtonState       => 2,
+  dwMeControlKeyState => 3,
+  dwEventFlags        => 4,
   # WINDOW_BUFFER_SIZE_RECORD
-  dwSize            => 1,
+  dwSize              => 1,
 };
 
 # GetCurrentConsoleFont
@@ -881,7 +880,7 @@ sub set_console_active_screen_buffer { # $bSucceeded ($hConsoleOutput)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -904,7 +903,7 @@ sub set_console_screen_buffer_size { # $bSucceeded ($hConsoleOutput, \%dwSize)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -930,7 +929,7 @@ sub set_console_window_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleWindow)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -949,7 +948,7 @@ sub create_console_screen_buffer { # $handle|undef ()
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : $r0;
@@ -961,7 +960,7 @@ sub get_console_screen_buffer_info { # $bSucceeded ($hConsoleOutput, \%lpConsole
     $^E = @_ != 2                 ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)            ? ERROR_INVALID_HANDLE
         : !defined(_HASH0($info)) ? ERROR_INVALID_PARAMETER
-        : readonly(%$info)        ? ERROR_INVALID_CRUNTIME_PARAMETER
+        : readonly(%$info)        ? ERROR_INVALID_PARAMETER
         : 0
         ;
 
@@ -997,7 +996,7 @@ sub get_console_screen_buffer_info { # $bSucceeded ($hConsoleOutput, \%lpConsole
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1043,7 +1042,7 @@ sub write_console_output { # $bSucceeded ($hConsoleOutput, $lpBuffer, \%lpWriteR
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1068,7 +1067,7 @@ sub write_console_output_character { # $bSucceeded ($hConsoleOutput, $lpCharacte
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1093,7 +1092,7 @@ sub write_console_output_attribute { # $bSucceeded ($hConsoleOutput, $lpAttribut
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1118,7 +1117,7 @@ sub set_console_cursor_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleCursorI
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1130,7 +1129,7 @@ sub get_console_cursor_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleCursorI
     $^E = @_ != 2                 ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)            ? ERROR_INVALID_HANDLE
         : !defined(_HASH0($info)) ? ERROR_INVALID_PARAMETER
-        : readonly(%$info)        ? ERROR_INVALID_CRUNTIME_PARAMETER
+        : readonly(%$info)        ? ERROR_INVALID_PARAMETER
         : 0
         ;
 
@@ -1149,7 +1148,7 @@ sub get_console_cursor_info { # $bSucceeded ($hConsoleOutput, \%lpConsoleCursorI
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1173,7 +1172,7 @@ sub set_console_cursor_position { # $bSucceeded ($hConsoleOutput, $dwCursorPosit
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1185,7 +1184,7 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
     $^E = @_ != 2                   ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)              ? ERROR_INVALID_HANDLE
         : !defined(_HASH0($record)) ? ERROR_INVALID_PARAMETER
-        : readonly(%$record)        ? ERROR_INVALID_CRUNTIME_PARAMETER
+        : readonly(%$record)        ? ERROR_INVALID_PARAMETER
         : 0
         ;
 
@@ -1195,8 +1194,8 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
     my $uintptr = unpack(UINT_PTR, pack('P', $buf));
     my $r = $proc_read_console_input->($h, $uintptr, 1, $tmp_arg);
     if ($r) {
-      my @ev = unpack('L', $buf);
-      $record->{event_type} = unpack('L', $buf);
+      my @ev = $record->{event_type}
+             = unpack('L', $buf) & 0xffff;
       switch: for ($record->{event_type}) {
         case: KEY_EVENT == $_ and do {
           push @ev, unpack('x4'.'LSSSSL', $buf);
@@ -1219,7 +1218,7 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
               y => $y,
             },
             button_state       => $ev[dwButtonState],
-            control_key_state  => $ev[dwControlKeyState],
+            control_key_state  => $ev[dwMeControlKeyState],
             event_flags        => $ev[dwEventFlags],
           };
           last;
@@ -1295,7 +1294,7 @@ sub read_console_input { # $bSucceeded ($hConsoleInput, \%lpBuffer)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1307,7 +1306,7 @@ sub get_console_mode { # $bSucceeded ($hConsoleHandle, \$lpMode)
     $^E = @_ != 2                   ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)              ? ERROR_INVALID_HANDLE
         : !defined(_SCALAR0($mode)) ? ERROR_INVALID_PARAMETER
-        : readonly($$mode)          ? ERROR_INVALID_CRUNTIME_PARAMETER
+        : readonly($$mode)          ? ERROR_INVALID_PARAMETER
         : 0
         ;
 
@@ -1322,7 +1321,7 @@ sub get_console_mode { # $bSucceeded ($hConsoleHandle, \$lpMode)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1344,7 +1343,7 @@ sub set_console_mode { # $bSucceeded ($hConsoleHandle, $lpMode)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1371,7 +1370,7 @@ sub fill_console_output_character { # $bSucceeded ($hConsoleOutput, $cCharacter,
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1397,7 +1396,7 @@ sub fill_console_output_attribute { # $bSucceeded ($hConsoleOutput, $wAttribute,
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1414,7 +1413,7 @@ sub create_event { # $handle|undef ()
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : $r0;
@@ -1450,7 +1449,7 @@ sub wait_for_multiple_objects { # $bSucceeded (\@lpHandles)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1471,7 +1470,7 @@ sub set_event { # $bSucceeded ($hEvent)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1483,7 +1482,7 @@ sub get_current_console_font { # $bSucceeded ($hConsoleOutput, \%dwFontSize)
     $^E = @_ != 2                 ? ERROR_BAD_ARGUMENTS
         : !_POSINT($h)            ? ERROR_INVALID_HANDLE
         : !defined(_HASH0($info)) ? ERROR_INVALID_PARAMETER
-        : readonly(%$info)        ? ERROR_INVALID_CRUNTIME_PARAMETER
+        : readonly(%$info)        ? ERROR_INVALID_PARAMETER
         : 0
         ;
 
@@ -1523,7 +1522,7 @@ sub get_current_console_font { # $bSucceeded ($hConsoleOutput, \%dwFontSize)
     if ($e1) {
       $err = $e1;
     } else {
-      $err = $^E = WSAEINVAL;
+      $err = $^E = ERROR_GEN_FAILURE;
     }
   }
   $err ? return : "0E0";
@@ -1711,8 +1710,8 @@ sub append_diff_line { # $nColumns ($wRow)
   return $n;
 }
 
-# compares 'back_buffer' with 'front_buffer' and prepares all changes in the form of
-# 'diff_msg's in the 'diff_buf'
+# compares 'back_buffer' with 'front_buffer' and prepares all changes in the 
+# form of 'diff_msg's in the 'diff_buf'
 sub prepare_diff_messages { # $bSucceeded ()
   croak(usage("$!", __FILE__, __FUNCTION__)) if
     $! = @_ ? E2BIG : 0;
@@ -2124,7 +2123,7 @@ sub input_event_producer { # $bSucceeded ()
   LOOP: for (;;) {
     if (!wait_for_multiple_objects($handles)) {
       $input_comm->enqueue( Event{Type => EventError, Err => $^E} );
-      # Win32::OutputDebugString(§input_comm: $^E");
+      # Win32::OutputDebugString("input_comm: $^E");
     }
 
     select: {
@@ -2137,7 +2136,7 @@ sub input_event_producer { # $bSucceeded ()
 
     if (!read_console_input($in, $r = {})) {
       $input_comm->enqueue( Event{Type => EventError, Err => $^E} );
-      # Win32::OutputDebugString(§input_comm: $^E");
+      # Win32::OutputDebugString("input_comm: $^E");
     }
 
     switch: for ($r->{event_type}) {
@@ -2278,19 +2277,19 @@ Termbox for Win32.
 =head1 COPYRIGHT AND LICENCE
 
  This file is part of the port of Termbox.
- 
+
  Copyright (C) 2012 by termbox-go authors
- 
+
  This library content was taken from the termbox-go implementation of Termbox
  which is licensed under MIT licence.
- 
+
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
  to deal in the Software without restriction, including without limitation
  the rights to use, copy, modify, merge, publish, distribute, sublicense,
  and/or sell copies of the Software, and to permit persons to whom the
  Software is furnished to do so, subject to the following conditions:
-    
+
  The above copyright notice and this permission notice shall be included in
  all copies or substantial portions of the Software.
 
@@ -2298,12 +2297,12 @@ Termbox for Win32.
 
 =over
 
-=item * 2024 by J. Schneider L<https://github.com/brickpool/>
+=item * 2024,2025 by J. Schneider L<https://github.com/brickpool/>
 
 =back
 
 =head1 DISCLAIMER OF WARRANTIES
- 
+
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
