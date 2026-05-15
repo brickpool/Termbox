@@ -207,6 +207,7 @@ sub ti_try_path { # \$data|undef ($path)
 
   # first try, the typical *nix path
   my $terminfo = $path . "/" . substr($term, 0, 1) . "/" . $term;
+  $! = 0;
   my $data = eval { # ReadFile
     use autodie;
     local $/; # enable localized slurp mode
@@ -221,6 +222,7 @@ sub ti_try_path { # \$data|undef ($path)
 
   # fallback to darwin specific dirs structure
   $terminfo = $path . "/" . sprintf("%x", ord($term)) . "/" . $term;
+  $! = 0;
   $data = eval { # ReadFile
     use autodie;
     local $/; # enable localized slurp mode
@@ -255,44 +257,23 @@ sub setup_term_builtin { # $success ()
     return "0E0";
   }
 
-  state $compat_table = {
-    "xterm" => {
-      keys    => $xterm_keys,
-      funcs   => $xterm_funcs,
-    },
-    "rxvt" => {
-      keys    => $rxvt_unicode_keys, 
-      funcs   => $rxvt_unicode_funcs,
-    },
-    "linux" => {
-      keys    => $linux_keys,
-      funcs   => $linux_funcs,
-    },
-    "Eterm" => {
-      keys    => $eterm_keys,
-      funcs   => $eterm_funcs,
-    },
-    "screen" => {
-      keys    => $screen_keys,
-      funcs   => $screen_funcs,
-    },
+  state $compat_table = [
+    ["xterm",  $xterm_keys,        $xterm_funcs],
+    ["rxvt",   $rxvt_unicode_keys, $rxvt_unicode_funcs],
+    ["linux",  $linux_keys,        $linux_funcs],
+    ["Eterm",  $eterm_keys,        $eterm_funcs],
+    ["screen", $screen_keys,       $screen_funcs],
     # let's assume that 'cygwin' is xterm compatible
-    "cygwin" => {
-      keys    => $xterm_keys,
-      funcs   => $xterm_funcs,
-    },
-    "st" => {
-      keys    => $xterm_keys,
-      funcs   => $xterm_funcs,
-    },
-  };
+    ["cygwin", $xterm_keys,        $xterm_funcs],
+    ["st",     $xterm_keys,        $xterm_funcs],
+  ];
 
   # try compatibility variants
-  foreach (keys %$compat_table) {
-    if (index($name, $_) != -1) {
-      my $it = $compat_table->{$_};
-      $keys = $it->{keys};
-      $funcs = $it->{funcs};
+  foreach my $it (@$compat_table) {
+    my ($partial, $k, $f) = @$it;
+    if (index($name, $partial) != -1) {
+      $keys = $k;
+      $funcs = $f;
       return "0E0";
     }
   }
@@ -320,8 +301,11 @@ sub setup_term { # $success ()
   # size of numbers section (in integers), 4: size of the strings section (in
   # integers), 5: size of the string table
 
-  read($rd, my $buf, scalar(@header)*$Config{i16size});
-  if ($!) {
+  my $header_len = scalar(@header) * $Config{i16size};
+  $! = 0;
+  my $n = read($rd, my $buf, $header_len);
+  if (!defined($n) || $n != $header_len) {
+    $! ||= EIO;
     return;
   } else {
     @header = unpack('v*', $buf);
@@ -380,24 +364,28 @@ sub ti_read_string { # $string ($rd, $str_off, $table)
 
   my $off;
 
+  $! = 0;
   seek($rd, $str_off, 0);
   if ($!) {
     return "";
   }
-  read($rd, my $buf, $Config{i16size});
-  if ($!) {
+  $! = 0;
+  if ((read($rd, my $buf, $Config{i16size})//0) != $Config{i16size}) {
+    $! ||= EIO;
     return "";
   } else {
     ($off) = unpack('v', $buf);
   }
+  $! = 0;
   seek($rd, $table + $off, 0);
   if ($!) {
     return "";
   }
   my $bs = '';
   for (;;) {
-    read($rd, $b, $Config{u8size});
-    if ($!) {
+    $! = 0;
+    if (read($rd, $b, $Config{u8size}//0) != $Config{u8size}) {
+      $! ||= EIO;
       return "";
     }
     if ($b eq "\0") {

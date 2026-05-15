@@ -1,5 +1,16 @@
 Revision history for Termbox::Go
 
+0.003007
+        2026-05-15
+        - Terminfo: keep Go-like errno flow; clear stale errno before reads
+        - Terminfo: make builtin compatibility matching deterministic
+        - Terminfo: harden binary parse for short reads/EOF; set EIO
+        - Terminal::Backend: align X10 mouse decode to Go Cb/Cx/Cy offsets
+        - Terminal::Backend: extract_raw_event no-op on empty dst buffer
+        - Terminal::Backend: guard flush on zero-byte writes (loop safety)
+        - Terminal::Backend: invalid UTF-8 -> U+FFFD, consume 1 byte
+        - Tests: update terminal parse expectations for Go X10 decoding
+
 0.003006
         2026-05-14
         - fix Win32 tb_peek_event timeout path to map undef to EventNone

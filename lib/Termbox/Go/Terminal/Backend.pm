@@ -740,23 +740,25 @@ sub flush { # $succeded ()
     $! = @_ ? E2BIG : 0;
 
   $outbuf->flush();
-  my $len = length($outstr);
+  my $buf = $outstr;
+  $outbuf->seek(0, 0);
+  $outstr = '';
+
+  my $len = length($buf);
   my $off = 0;
 
   while ($off < $len) {
-    my $n = syswrite($out, $outstr, $len - $off, $off);
+    my $n = syswrite($out, $buf, $len - $off, $off);
     if (!defined $n) {
-      my $err = $! + 0;
-      $outbuf->seek(0, 0);
-      $outstr = '';
-      $! = $err;
+      return;
+    }
+    if ($n == 0) {
+      $! ||= EIO;
       return;
     }
     $off += $n;
   }
 
-  $outbuf->seek(0, 0);
-  $outstr = '';
   return "0E0";
 }
 
@@ -886,7 +888,7 @@ sub parse_mouse_event { # $count, $succeded (\%event, $buf)
   if ($buf =~ /^\033\[M/ && length($buf) >= 6) {
     # X10 mouse encoding, the simplest one
     # \033 [ M Cb Cx Cy
-    my $b = ord(substr($buf, 3, 1));
+    my $b = ord(substr($buf, 3, 1)) - 32;
     switch: for ($b & 3) {
       case: $_ == 0 and do {
         if ($b & 64) {
@@ -923,8 +925,8 @@ sub parse_mouse_event { # $count, $succeded (\%event, $buf)
     }
 
     # the coord is 1,1 for upper left
-    $event->{MouseX} = ord(substr($buf, 4, 1)) - 1;
-    $event->{MouseY} = ord(substr($buf, 5, 1)) - 1;
+    $event->{MouseX} = ord(substr($buf, 4, 1)) - 1 - 32;
+    $event->{MouseY} = ord(substr($buf, 5, 1)) - 1 - 32;
     return (6, TRUE);
   } elsif ($buf =~ /^\033\[<?/) {
     # xterm 1006 extended mode or urxvt 1015 extended mode
@@ -1047,14 +1049,16 @@ sub extract_raw_event { # $succeded (\$data, \%event)
         ;
 
   lock $inbuf;
-  my $n = bytes::length($inbuf);
-  if (!$n) {
+  my $avail = bytes::length($inbuf);
+  if (!$avail) {
     return FALSE;
   }
 
-  if (my $size = bytes::length($$data)) {
-    $n = $size if $size < $n;
+  my $n = bytes::length($$data);
+  if ($n == 0) {
+    return FALSE;
   }
+  $n = $avail if $avail < $n;
 
   $$data = bytes::substr($inbuf, 0, $n);
   $inbuf = bytes::substr($inbuf, $n);
@@ -1156,7 +1160,11 @@ sub extract_event { # $extract_event_res (\$inbuf, \%event, $allow_esc_wait)
     return event_extracted;
   }
 
-  return event_not_extracted;
+  # Match Go's rune fallback behavior: consume one byte and emit U+FFFD.
+  $event->{Ch} = 0xfffd;
+  $event->{Key} = 0;
+  $event->{N} = 1;
+  return event_extracted;
 }
 
 # from escwait.go/escwait_darwin.go
