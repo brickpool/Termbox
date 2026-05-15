@@ -395,7 +395,7 @@ sub Flush { # $errno ()
         $x += $w;
         next;
       }
-      $front = { %$back };
+      $front_buffer->{cells}->[$cell_offset] = { %$back };
       send_attr($back->{Fg}, $back->{Bg});
 
       if ($w == 2 && $x == $front_buffer->{width} - 1) {
