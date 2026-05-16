@@ -571,33 +571,42 @@ sub get_term_size { # $cols, $rows ($fd)
 
   my ($col, $row);
   local $@;
-  if (eval { require Win32::Console; require Win32API::File }) {
-    my $h = Win32API::File::FdGetOsFHandle($fd) // -1;
-    if ($h != -1) {
-      ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($h);
-    }
-  } elsif (eval { require 'sys/ioctl.ph' }) {
-    my $fh = IO::File->new_from_fd($fd, 'w');
-    if (-t $fh) {
-      my $sz = pack('S4', 0,0,0,0);
-      if ( ioctl($fh, &TIOCGWINSZ, $sz) ) {
-        ($row, $col) = unpack('S4', $sz);
+  if ($^O eq 'MSWin32') {
+    if (eval { require Win32::Console; require Win32API::File }) {
+      my $h = Win32API::File::FdGetOsFHandle($fd) // -1;
+      if ($h != -1) {
+        ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($h);
       }
     }
-  } elsif (eval { require Term::ReadKey }) {
+  } 
+  else {
     my $fh = IO::File->new_from_fd($fd, 'w');
-    ($col, $row) = Term::ReadKey::GetTerminalSize($fh);
+    if (eval { require Term::ReadKey }) {
+      ($col, $row) = Term::ReadKey::GetTerminalSize($fh);
+    }
+    if (!$col || !$row) {
+      if (-t $fh ) {
+        if ( eval { require 'sys/ioctl.ph' } ) {
+          my $sz = pack('S4', 0,0,0,0);
+          if ( ioctl($fh, &TIOCGWINSZ, $sz) ) {
+            ($row, $col) = unpack('S4', $sz);
+          }
+        }
+      }
+    }
   }
   if (!$col || !$row) {
-    if (-t STDIN) {
-      # -a is POSIX, --all is not
-      local $_ = '' . `stty -a 2>/dev/null`;
-      if (m/(?:;\s*rows\s+(\d+);|;\s*(\d+)\s+rows;)/) {
-        $row = $1 ? $1 : $2 ? $2 : 0;
-      }
-      if (m/(?:;\s*columns\s+(\d+);|;\s*(\d+)\s+columns;)/) {
-        $col = $1 ? $1 : $2 ? $2 : 0;
-      }
+    # Note that mode con prints in callers language; -a is POSIX, --all is not
+    $_ = ( $^O eq "MSWin32" ? `mode con` : `stty -a 2>/dev/null` ) || '';
+    if (m/\w(?#rows):\s*([1-9][0-9]*).*?\w:\s*\d+/s or 
+        m/(?:;\s*rows\s+(\d+);|;\s*(\d+)\s+rows;)/
+    ) {
+      $row = $1 ? $1 : $2 ? $2 : 24;
+    }
+    if (m/\w:\s*[1-9].+?\w(?#columns):\s*([1-9][0-9]*)/s or 
+        m/(?:;\s*columns\s+(\d+);|;\s*(\d+)\s+columns;)/
+    ) {
+      $col = $1 ? $1 : $2 ? $2 : 80;
     }
   }
   if (!$col || !$row) {

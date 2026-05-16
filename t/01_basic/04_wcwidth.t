@@ -1,7 +1,7 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 13;
+use Test::More;
 # use Test::More::UTF8 qw( failure out );
 use utf8;
 binmode Test::More->builder->failure_output(), ':utf8';

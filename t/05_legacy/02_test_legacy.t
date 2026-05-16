@@ -1,9 +1,22 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 25;
+use Test::More;
 use Test::Exception;
 use POSIX qw( dup2 );
+
+if ($^O eq 'MSWin32') {
+  my $fd = fileno(\*STDERR);
+  my $has_console = !$ENV{AUTOMATED_TESTING} && defined $fd && $fd >= 0;
+  if (!$has_console) {
+    plan skip_all => 'Test requires a valid console (not available)';
+  }
+} else {
+  my $has_tty = !$ENV{AUTOMATED_TESTING} && -w '/dev/tty';
+  if (!$has_tty) {
+    plan skip_all => 'Test requires a TTY device (not available)';
+  }
+}
 
 # Alchemical symbol "Fire"
 # https://en.wikipedia.org/wiki/List_of_Unicode_characters#Alchemical_symbols

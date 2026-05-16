@@ -7,9 +7,6 @@ use Test::Exception;
 if ($^O ne 'MSWin32') {
   plan skip_all => 'Windows OS required for testing';
 }
-else {
-  plan tests => 7;
-}
 
 use Devel::StrictMode;
 use POSIX qw( :errno_h );

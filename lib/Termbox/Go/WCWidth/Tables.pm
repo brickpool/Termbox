@@ -1,4 +1,6 @@
 package Termbox::Go::WCWidth::Tables;
+use strict;
+use warnings;
 
 use Exporter qw( import );
 our @EXPORT = qw(

@@ -4,11 +4,14 @@ use warnings;
 use Test::More;
 use Test::Exception;
 
-if ($^O ne 'MSWin32') {
+if ($^O eq 'MSWin32') {
+  my $fd = fileno(\*STDERR);
+  my $has_console = !$ENV{AUTOMATED_TESTING} && defined $fd && $fd >= 0;
+  if (!$has_console) {
+    plan skip_all => 'Test requires a valid console (not available)';
+  }
+} else {
   plan skip_all => 'Windows OS required for testing';
-}
-else {
-  plan tests => 12;
 }
 
 use Data::Dumper;

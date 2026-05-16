@@ -1,7 +1,7 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 11;
+use Test::More;
 use Test::Exception;
 
 use_ok 'Termbox::Go::Common', qw(

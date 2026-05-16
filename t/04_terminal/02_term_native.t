@@ -1,9 +1,23 @@
 use 5.014;
+use strict;
 use warnings;
 
-use Test::More tests => 22;
+use Test::More;
 use Test::Exception;
 use POSIX qw( :fcntl_h );
+
+my $tty;
+if ($^O eq 'MSWin32') {
+  my $fd = fileno(\*STDERR);
+  if (!defined $fd || $fd < 0) {
+    plan skip_all => 'Test requires a valid console handle (not available)';
+  }
+  $tty = *STDERR;
+} else {
+  if (!sysopen($tty, "/dev/tty", O_WRONLY, 0)) {
+    plan skip_all => 'Test requires a writable /dev/tty (not available)';
+  }
+}
 
 use_ok 'Termbox::Go::Common', qw(
   :keys
@@ -20,25 +34,12 @@ use_ok 'Termbox::Go::Terminal::Backend', qw(
   :vars
 );
 
-our $out;
-if ($^O eq 'MSWin32') {
-  $out = \*STDERR;
-} else {
-  sysopen($out, "/dev/tty", O_WRONLY, 0);
-}
+our $out = $tty;
 our $outfd = fileno($out);
 our $back_buffer; $back_buffer->init(1,1);
 our $front_buffer; $front_buffer->init(1,1);
 my $sequence = "\x1b[MC\x95(";
 our $inbuf = 'abc';
-BEGIN {
-  if ($^O eq 'MSWin32') {
-    # Term::ReadKey::GetTerminalSize did not work if the handle was
-    # redirected or duplicated
-    $ENV{COLUMNS} ||= 80;
-    $ENV{LINES} ||= 24;
-  }
-}
 
 lives_ok { write_cursor(0, 0) } 'write_cursor';
 lives_ok { write_sgr_fg(ColorYellow()) } 'write_sgr_fg';
