@@ -1,5 +1,11 @@
 Revision history for Termbox::Go
 
+0.003009
+        2026-05-16
+        - fix get_term_size re-adjusted (see also GH #7)
+        - convert terminal tests to headless-capable skip logic for CPAN/CI
+        - add threads dependency in Makefile.PL
+
 0.003008
         2026-05-15
         - fix sync changed cells back into front buffer during Flush (GH #4)
