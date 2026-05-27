@@ -1,10 +1,11 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
-use Test::More tests => 1;
+use Test::More;
 
-use_ok 'Termbox::Go', qw( :DEFAULT );
-
-diag @Termbox::Go::ISA;
+BEGIN {
+  use_ok 'Termbox::PP';
+}
 
 done_testing;

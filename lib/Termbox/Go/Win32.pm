@@ -59,7 +59,7 @@ use Termbox::Go::Devel qw(
   __FUNCTION__
   usage
 );
-use Termbox::Go::WCWidth qw( wcwidth );
+use Termbox::PP::WCWidth qw( wcwidth );
 use Termbox::Go::Win32::Backend qw( :all );
 
 # ------------------------------------------------------------------------

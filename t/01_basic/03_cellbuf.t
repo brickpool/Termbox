@@ -1,24 +1,19 @@
-use 5.014;
+use 5.010;
 use warnings;
 
-use Test::More tests => 6;
+use Test::More;
 use Test::Exception;
 
 use Data::Dumper;
 use Devel::StrictMode;
 
-use_ok 'Termbox::Go::Common', qw( :types :color :vars );
+use_ok 'Termbox::PP';
 
-our $back_buffer;
-our $front_buffer;
-
-is( ColorDefault(), 0, 'ColorDefault' );
-
-my $buf = $back_buffer;
+my $buf;
 subtest 'cellbuf->new()' => sub {
   plan tests => 2;
-  isa_ok($back_buffer, 'cellbuf');
-  isa_ok($front_buffer, 'cellbuf');
+  $buf = new_ok( 'cellbuf' );
+  isa_ok($buf, 'cellbuf');
   diag Dumper $buf if STRICT;
 };
 
@@ -39,7 +34,7 @@ subtest 'cellbuf->init()' => sub {
   );
   is_deeply(
     $buf->{cells},
-    [ map { Cell() } 1..$buf->{width}*$buf->{height} ],
+    [ map { Termbox::Cell->new() } 1..$buf->{width}*$buf->{height} ],
     'exists'
   );
   diag Dumper $buf if STRICT;
@@ -50,8 +45,8 @@ subtest 'cellbuf->clear()' => sub {
   lives_ok(
     sub {
       my $i;
-      $_->{Fg} = ++$i foreach @{ $buf->{cells} };
-      $buf->clear();
+      $_->{fg} = ++$i foreach @{ $buf->{cells} };
+      $buf->clear() and die;
     },
     'clear'
   );
@@ -65,7 +60,7 @@ subtest 'cellbuf->clear()' => sub {
   is_deeply(
     $buf->{cells},
     [ 
-      map { { Ch => ord(' '), Fg => 0, Bg => 0 } } 
+      map { { ch => ' ', fg => 0, bg => 0 } } 
         1..$buf->{width}*$buf->{height} 
     ],
     'empty'
@@ -78,7 +73,7 @@ subtest 'cellbuf->resize()' => sub {
   lives_ok(
     sub {
       my $i;
-      $_->{Fg} = ++$i foreach @{ $buf->{cells} };
+      $_->{fg} = ++$i foreach @{ $buf->{cells} };
       $buf->resize(2, 3);
     },
     'resize 2x3'
@@ -92,12 +87,12 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ord(' '), Fg => 1, Bg => 0 },
-      { Ch => ord(' '), Fg => 2, Bg => 0 },
-      { Ch => ord(' '), Fg => 4, Bg => 0 },
-      { Ch => ord(' '), Fg => 5, Bg => 0 },
-      { Ch => ord(' '), Fg => 7, Bg => 0 },
-      { Ch => ord(' '), Fg => 8, Bg => 0 },
+      { ch => ' ', fg => 1, bg => 0 },
+      { ch => ' ', fg => 2, bg => 0 },
+      { ch => ' ', fg => 4, bg => 0 },
+      { ch => ' ', fg => 5, bg => 0 },
+      { ch => ' ', fg => 7, bg => 0 },
+      { ch => ' ', fg => 8, bg => 0 },
     ],
     'equal'
   );
@@ -117,10 +112,10 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ord(' '), Fg => 1, Bg => 0 },
-      { Ch => ord(' '), Fg => 4, Bg => 0 },
-      { Ch => ord(' '), Fg => 7, Bg => 0 },
-      { Ch => ord(' '), Fg => 0, Bg => 0 },
+      { ch => ' ', fg => 1, bg => 0 },
+      { ch => ' ', fg => 4, bg => 0 },
+      { ch => ' ', fg => 7, bg => 0 },
+      { ch => ' ', fg => 0, bg => 0 },
     ],
     'equal'
   );
@@ -140,10 +135,10 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ord(' '), Fg => 1, Bg => 0 },
-      { Ch => ord(' '), Fg => 0, Bg => 0 },
-      { Ch => ord(' '), Fg => 4, Bg => 0 },
-      { Ch => ord(' '), Fg => 0, Bg => 0 },
+      { ch => ' ', fg => 1, bg => 0 },
+      { ch => ' ', fg => 0, bg => 0 },
+      { ch => ' ', fg => 4, bg => 0 },
+      { ch => ' ', fg => 0, bg => 0 },
     ],
     'equal'
   );
@@ -151,7 +146,7 @@ subtest 'cellbuf->resize()' => sub {
   lives_ok(
     sub {
       my $i;
-      $_->{Fg} = ++$i foreach @{ $buf->{cells} };
+      $_->{fg} = ++$i foreach @{ $buf->{cells} };
       $buf->resize(3, 2);
     },
     'resize 3x2'
@@ -165,12 +160,12 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { Ch => ord(' '), Fg => 1, Bg => 0 },
-      { Ch => ord(' '), Fg => 2, Bg => 0 },
-      { Ch => ord(' '), Fg => 0, Bg => 0 },
-      { Ch => ord(' '), Fg => 3, Bg => 0 },
-      { Ch => ord(' '), Fg => 4, Bg => 0 },
-      { Ch => ord(' '), Fg => 0, Bg => 0 },
+      { ch => ' ', fg => 1, bg => 0 },
+      { ch => ' ', fg => 2, bg => 0 },
+      { ch => ' ', fg => 0, bg => 0 },
+      { ch => ' ', fg => 3, bg => 0 },
+      { ch => ' ', fg => 4, bg => 0 },
+      { ch => ' ', fg => 0, bg => 0 },
     ],
     'equal'
   );

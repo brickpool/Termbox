@@ -1,41 +1,69 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
-use Test::More tests => 4;
-use Test::Exception;
+use Test::More;
 
-use Data::Dumper;
-use Devel::StrictMode;
+BEGIN {
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox', qw( :return :event :color );
+}
 
-use_ok 'Termbox::Go::Common', qw( :func max_attr );
+subtest 'global default shape after tb_reset' => sub {
+  plan tests => 22;
 
-my @rgb = (1,2,3);
-my $attr;
+  is(Termbox::tb_reset(), TB_OK(), 'tb_reset returns TB_OK');
 
-subtest 'RGBToAttribute()' => sub {
-  plan tests => 3;
-  lives_ok { $attr = RGBToAttribute(@rgb) } 'lives';
-  is( 
-    ($attr / max_attr()) & 0xffffff, 
-    0x010203, 
-    'attr'
-  );
-  is( 
-    ($attr / max_attr()) >> 25, 
-    1, 
-    'msb'
-  );
-  diag sprintf("%08x", $attr) if STRICT;
+  my $g = $Termbox::global;
+  isa_ok($g, 'tb_global', 'global object class');
+
+  is($g->{initialized}, 0, 'initialized defaults to 0');
+  is($g->{width}, -1, 'width defaults to -1');
+  is($g->{height}, -1, 'height defaults to -1');
+  is($g->{cursor_x}, -1, 'cursor_x defaults to -1');
+  is($g->{cursor_y}, -1, 'cursor_y defaults to -1');
+  is($g->{last_x}, -1, 'last_x defaults to -1');
+  is($g->{last_y}, -1, 'last_y defaults to -1');
+
+  is($g->{fg}, TB_DEFAULT(), 'fg defaults to TB_DEFAULT');
+  is($g->{bg}, TB_DEFAULT(), 'bg defaults to TB_DEFAULT');
+  is($g->{input_mode}, TB_INPUT_ESC(), 'input_mode defaults to TB_INPUT_ESC');
+  is($g->{output_mode}, TB_OUTPUT_NORMAL(), 'output_mode defaults to TB_OUTPUT_NORMAL');
+
+  is(ref($g->{resize_pipe}), 'ARRAY', 'resize_pipe is an array-ref');
+  is(scalar(@{ $g->{resize_pipe} }), 2, 'resize_pipe has two entries');
+  is($g->{resize_pipe}[0], -1, 'resize_pipe[0] defaults to -1');
+  is($g->{resize_pipe}[1], -1, 'resize_pipe[1] defaults to -1');
+
+  is(ref($g->{caps}), 'ARRAY', 'caps is an array-ref');
+  is(scalar(@{ $g->{caps} }), Termbox::TB_CAP__COUNT(), 'caps has TB_CAP__COUNT entries');
+
+  is(ref($g->{back}), 'cellbuf', 'back buffer is a cellbuf');
+  is(ref($g->{front}), 'cellbuf', 'front buffer is a cellbuf');
+  is(ref($g->{cap_trie}), 'captrie', 'cap_trie is a captrie');
 };
 
-subtest 'AttributeToRGB()' => sub {
+subtest 'tb_last_errno tracks global error slot' => sub {
   plan tests => 2;
-  lives_ok { @rgb = AttributeToRGB($attr) } 'lives';
-  is_deeply( \@rgb, [1,2,3], 'rgb' );
-  diag join(',', @rgb) if STRICT;
+
+  is(Termbox::tb_reset(), TB_OK(), 'tb_reset returns TB_OK');
+  $Termbox::global->{last_errno} = 123;
+  is(Termbox::tb_last_errno(), 123, 'tb_last_errno reads global->{last_errno}');
 };
 
-my $ok;
-lives_ok { $ok = is_cursor_hidden(1, 1) } 'is_cursor_hidden()';
+subtest 'tb_reset preserves ttyfd_open only' => sub {
+  plan tests => 5;
 
-done_testing;
+  $Termbox::global->{ttyfd_open} = 1;
+  $Termbox::global->{initialized} = 1;
+  $Termbox::global->{width} = 80;
+  $Termbox::global->{height} = 24;
+
+  is(Termbox::tb_reset(), TB_OK(), 'tb_reset returns TB_OK');
+  is($Termbox::global->{ttyfd_open}, 1, 'tb_reset preserves ttyfd_open');
+  is($Termbox::global->{initialized}, 0, 'tb_reset clears initialized');
+  is($Termbox::global->{width}, -1, 'tb_reset resets width');
+  is($Termbox::global->{height}, -1, 'tb_reset resets height');
+};
+
+done_testing();

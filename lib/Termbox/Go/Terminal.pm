@@ -70,7 +70,7 @@ use Termbox::Go::Devel qw(
 use Termbox::Go::Terminal::Backend qw( :all );
 use Termbox::Go::Terminfo qw( :func );
 use Termbox::Go::Terminfo::Builtin qw( :index );
-use Termbox::Go::WCWidth qw( wcwidth );
+use Termbox::PP::WCWidth qw( wcwidth );
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
