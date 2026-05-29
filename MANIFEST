@@ -31,6 +31,7 @@ lib/Termbox/Go/Win32.pm
 lib/Termbox/Go/Win32/Backend.pm
 lib/Termbox/Go/WinVT.pm
 lib/Termbox/PP.pm
+lib/Termbox/PP/Terminfo/Builtin.pm
 lib/Termbox/PP/WCWidth.pm
 lib/Termbox/PP/WCWidth/Tables.pm
 LICENSE
@@ -58,6 +59,7 @@ t/02_windows/06_win32errno.t
 t/03_terminfo/00_load.t
 t/03_terminfo/01_terminfo_builtin_test.t
 t/03_terminfo/02_terminfo.t
+t/03_terminfo/03_init_term_attrs_caps.t
 t/04_terminal/00_load.t
 t/04_terminal/01_term_types.t
 t/04_terminal/02_term_native.t
@@ -73,10 +75,11 @@ t/05_legacy/06_test_resize.t
 t/06_api/00_load.t
 t/06_api/01_test_import.t
 t/06_api/02_library_utility_functions.t
-t/06_api/03_print_printf_func.t
-t/06_api/04_set_cell_contents.t
-t/06_api/05_clear_back_buffer.t
-t/06_api/06_get_back_buffer_size.t
-t/06_api/07_send_helpers.t
+t/06_api/03_utf8_char_convert.t
+t/06_api/04_print_printf_func.t
+t/06_api/05_set_cell_contents.t
+t/06_api/06_clear_back_buffer.t
+t/06_api/07_get_back_buffer_size.t
+t/06_api/08_send_helpers.t
 xt/01_pod.t
 xt/win32consoleA.t

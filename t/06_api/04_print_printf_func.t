@@ -50,6 +50,8 @@ subtest 'tb_print and tb_print_ex' => sub {
 };
 
 subtest 'tb_print_ex combining char uses extend path' => sub {
+  local $SIG{__WARN__} = sub { };
+
   $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
@@ -65,11 +67,7 @@ subtest 'tb_print_ex combining char uses extend path' => sub {
   is($rv, TB_OK(), 'tb_print_ex accepts base plus combining char');
   is($out_w, 1, 'combining char does not increase out_w');
 
-  my $cells;
-  {
-    local $SIG{__WARN__} = sub { };
-    $cells = Termbox::tb_cell_buffer();
-  }
+  my $cells = Termbox::tb_cell_buffer();
   is($cells->[0]->{ch}, "A\x{0301}", 'cell keeps combined grapheme');
   is(Termbox::tb_deinit(), TB_OK(), 'tb_deinit succeeds');
 };

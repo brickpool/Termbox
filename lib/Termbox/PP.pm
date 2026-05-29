@@ -34,8 +34,12 @@ our $AUTHORITY = 'github:brickpool';
 # Imports ----------------------------------------------------------------
 # ------------------------------------------------------------------------
 
+require bytes;
 use Config;
-use POSIX qw( :termios_h );
+use POSIX qw(
+  :errno_h
+  :termios_h
+);
 use Scalar::Util qw(
   looks_like_number
   blessed
@@ -353,6 +357,8 @@ our %EXPORT_TAGS = (
 # overridden by setting the corresponding environment variables before loading 
 # this module.
 
+use constant INT16_SIZE => $Config{shortsize};
+
 use constant TB_OPT_EGC => exists $ENV{TB_OPT_EGC} ? $ENV{TB_OPT_EGC} : 1;
 
 # Define this to set the string length used in 'tb_printf' and 'tb_sendf'.
@@ -362,7 +368,14 @@ use constant TB_OPT_PRINTF_BUF => exists $ENV{TB_OPT_PRINTF_BUF}
 
 # In this port, TB_OPT_LIBC_WCHAR selects the Unicode::UCD-based wcwidth backend
 use constant TB_OPT_LIBC_WCHAR => exists $ENV{TB_OPT_LIBC_WCHAR} 
-  ? $ENV{TB_OPT_LIBC_WCHAR} : 1;
+  ? $ENV{TB_OPT_LIBC_WCHAR} 
+  : 1;
+
+use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? $ENV{PATH_MAX} : 4096;
+
+use constant TB_TERMINFO_DIR => exists $ENV{TB_TERMINFO_DIR} 
+  ? $ENV{TB_TERMINFO_DIR} 
+  : undef;
 
 # ASCII key constants ($tb_event->key)
 use constant {
@@ -429,6 +442,23 @@ use constant {
   TB_KEY_F10              => 0xFFFF - 9,
   TB_KEY_F11              => 0xFFFF - 10,
   TB_KEY_F12              => 0xFFFF - 11,
+  TB_KEY_INSERT           => 0xFFFF - 12,
+  TB_KEY_DELETE           => 0xFFFF - 13,
+  TB_KEY_HOME             => 0xFFFF - 14,
+  TB_KEY_END              => 0xFFFF - 15,
+  TB_KEY_PGUP             => 0xFFFF - 16,
+  TB_KEY_PGDN             => 0xFFFF - 17,
+  TB_KEY_ARROW_UP         => 0xFFFF - 18,
+  TB_KEY_ARROW_DOWN       => 0xFFFF - 19,
+  TB_KEY_ARROW_LEFT       => 0xFFFF - 20,
+  TB_KEY_ARROW_RIGHT      => 0xFFFF - 21,
+  TB_KEY_BACK_TAB         => 0xFFFF - 22,
+  TB_KEY_MOUSE_LEFT       => 0xFFFF - 23,
+  TB_KEY_MOUSE_RIGHT      => 0xFFFF - 24,
+  TB_KEY_MOUSE_MIDDLE     => 0xFFFF - 25,
+  TB_KEY_MOUSE_RELEASE    => 0xFFFF - 26,
+  TB_KEY_MOUSE_WHEEL_UP   => 0xFFFF - 27,
+  TB_KEY_MOUSE_WHEEL_DOWN => 0xFFFF - 28,
 };
 
 use constant {
@@ -668,7 +698,52 @@ sub wcwidth {
   return 1;
 }
 
+# Use NCCS (if supported); otherwise, read at least 32 fields.
+BEGIN { if (eval { &POSIX::NCCS }) {
+  *NCCS = \&POSIX::NCCS;
+} else {
+  *NCCS = sub () { 32 };
+}}
+
+sub cfmakeraw {    # void (\$tios)
+  my ($tios) = @_;
+  return unless blessed($tios) && $tios->isa('POSIX::Termios');
+  $tios->setiflag(
+    $tios->getiflag() 
+    & ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON)
+  );
+  $tios->setoflag(
+    $tios->getoflag() 
+    & ~OPOST
+  );
+  $tios->setlflag(
+    $tios->getlflag() 
+    & ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN)
+  );
+  $tios->setcflag(
+    ($tios->getcflag() & ~(CSIZE | PARENB)) | CS8
+  );
+  return;
+}
+
+my $clone = sub {    # $clone ()
+  my ($src) = @_;
+  return undef unless blessed($src) && $src->isa('POSIX::Termios');
+  my $dst = POSIX::Termios->new();
+  $dst->setiflag($src->getiflag());
+  $dst->setoflag($src->getoflag());
+  $dst->setcflag($src->getcflag());
+  $dst->setlflag($src->getlflag());
+  $dst->setispeed($src->getispeed());
+  $dst->setospeed($src->getospeed());
+  for my $i (0 .. NCCS - 1) {
+    $dst->setcc($i, $src->getcc($i));
+  }
+  return $dst;
+};
+
 BEGIN { if (STRICT) {
+  no warnings 'once';
   require Params::Check;
   *check = sub ($$) {
     local $Params::Check::SANITY_CHECK_TEMPLATE = 1;
@@ -692,7 +767,7 @@ sub Termbox::Cell::new {    # $cell ()
   my ($class) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\w+(::\w+)*$/ },
+      1 => { required => 1, defined => 1, allow => qr/\w+(::\w+)*$/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return bless { 
@@ -718,8 +793,8 @@ sub Termbox::Cell::set {    # $int ($ch, $fg, $bg)
     check {
       1 => { required => 1, allow => \&blessed },
       2 => { required => 1, default => "\0", strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   } else {
     $ch //= "\0";
@@ -816,8 +891,8 @@ sub cellbuf::init {    # $int ($width, $height)
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/^[1-9]\d*$/ },
-      3 => { required => 1, defined => 1, allow => qr/^[1-9]\d*$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $c->{width}  = $w;
@@ -845,8 +920,8 @@ sub cellbuf::get {    # $int ($x, $y)
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return undef unless $c->in_bounds($x, $y);
@@ -858,8 +933,8 @@ sub cellbuf::in_bounds {    # $bool ($x, $y)
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
   if ($x < 0 || $x >= $c->{width} || $y < 0 || $y >= $c->{height}) {
@@ -873,8 +948,8 @@ sub cellbuf::resize {     # $int ($width, $height)
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/^[1-9]\d*$/ },
-      3 => { required => 1, defined => 1, allow => qr/^[1-9]\d*$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my $rv;
@@ -951,7 +1026,7 @@ sub capnode::set_nchildren {    # $int ($nchildren)
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $self->{nchildren} = 0+ $n;
@@ -1050,8 +1125,8 @@ sub captrie::add {    # $int ($cap|undef, $key, $mod)
     check {
       1 => { required => 1, allow => \&blessed },
       2 => { required => 1, default => '', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   # Nothing to do for empty caps
@@ -1077,22 +1152,17 @@ sub captrie::add {    # $int ($cap|undef, $key, $mod)
   return $self->rebuild_alt();
 }
 
-sub captrie::find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
-  my ($self, $buf, $nbuf, $last, $depth) = @_;
+sub captrie::find {    # $int ($buf, \$last, \$depth)
+  my ($self, $buf, $last, $depth) = @_;
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, default => '', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
       4 => { required => 1, allow => \&CORE::ref },
       5 => { required => 1, allow => \&CORE::ref },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }  
-  my $in;
-  return TB_ERR unless eval {
-    use warnings FATAL => 'all';
-    $in = substr($buf, 0, $nbuf);
-  };
+  }
 
   my $node = capnode->new(
     is_leaf   => 0,
@@ -1102,7 +1172,7 @@ sub captrie::find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
     cap       => '',
   );
 
-  if (defined(my $m = $self->best_match($in))) {
+  if (defined(my $m = $self->best_match($buf))) {
     my $leaf = $self->{exact}{$m};
     $node = capnode->new(
       is_leaf   => 1,
@@ -1113,10 +1183,10 @@ sub captrie::find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
     );
     $$depth = length($m);
   }
-  elsif ($self->has_prefix($in)) {
+  elsif ($self->has_prefix($buf)) {
     $node->set_nchildren(1);
-    $node->set_cap($in);
-    $$depth = length($in);
+    $node->set_cap($buf);
+    $$depth = length($buf);
   }
   else {
     $$depth = 0;
@@ -1161,6 +1231,11 @@ $global = bless({
   # Modes
   input_mode  => TB_INPUT_ESC,
   output_mode => TB_OUTPUT_NORMAL,
+
+  # Terminfo
+  terminfo => '',
+  # ->{nterminfo} is not needed because the terminfo format is self-describing 
+  # and we can just parse it directly from the data string.
 
   # Parser
   caps        => [ (undef) x TB_CAP__COUNT ],
@@ -1278,13 +1353,13 @@ sub tb_cluster_width;
 # Terminal initialization helpers
 sub init_term_attrs;
 sub init_term_caps;
-sub load_builtin_caps;
 
 # Terminfo parsing helpers
 sub load_terminfo;
 sub load_terminfo_from_path;
 sub read_terminfo_path;
 sub parse_terminfo_caps;
+sub load_builtin_caps;
 sub get_terminfo_string;
 sub get_terminfo_int16;
 
@@ -1379,8 +1454,8 @@ sub tb_set_clear_attrs {    # $int ($fg, $bg)
   my ($fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   } else {
     $fg += 0;
@@ -1400,11 +1475,11 @@ sub tb_set_cell {    # $int ($x, $y, $ch, $fg, $bg)
   my ($x, $y, $ch, $fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      5 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return tb_set_cell_ex($x, $y, [$ch], 1, $fg, $bg);
@@ -1414,18 +1489,18 @@ sub tb_set_cell_ex {    # $int ($x, $y, \@ch, $nch, $fg, $bg)
   my ($x, $y, $ch, $nch, $fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
       3 => { required => 1, default => [], strict_type => 1 },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      5 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      6 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      6 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+    return TB_ERR if @$ch != $nch;
   } else {
-    $ch //= [];
+    $ch // return TB_ERR;
     $nch //= 0;
   }
-
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
   my $back = $global->{back} // return TB_ERR;
@@ -1433,22 +1508,16 @@ sub tb_set_cell_ex {    # $int ($x, $y, \@ch, $nch, $fg, $bg)
   return TB_ERR if $nch < 1;
 
   my $cell = $back->get($x, $y) // return TB_ERR;
-  # Keep set_cell_ex close to termbox: store payload only.
-  # Width normalization and fallback are handled in print/present paths.
-  my $str = eval {
-    use warnings FATAL => 'all';
-    pack('U*', @$ch[0 .. $nch-1]);
-  } // return TB_ERR;
-  return $cell->set($str, $fg, $bg);
+  return $cell->set(pack('U*', @$ch), $fg, $bg);
 }
 
 sub tb_extend_cell {    # $int ($x, $y, $ch)
   my ($x, $y, $ch) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
 
@@ -1470,7 +1539,7 @@ sub tb_set_input_mode {    # $int ($mode)
   my ($mode) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1504,7 +1573,7 @@ sub tb_set_output_mode {    # $int ($mode)
   my ($mode) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1539,22 +1608,21 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
   my ($x, $y, $fg, $bg, $out_w, $str) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
       5 => { required => 1, default => \0, strict_type => 1 },
-      6 => { required => 1, default => '', strict_type => 1 },
+      6 => { required => 1, defined => 1, default => '', strict_type => 1 },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   } else {
     $str //= '';
   }
 
-  return TB_ERR_NOT_INIT 
-    unless $global->{initialized};
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+
   my $back = $global->{back};
-  return TB_ERR_OUT_OF_BOUNDS 
-    unless $back->in_bounds($x, $y);
+  return TB_ERR_OUT_OF_BOUNDS unless $back->in_bounds($x, $y);
 
   $$out_w = 0 if defined($out_w);
 
@@ -1562,57 +1630,50 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
   my $w;
   my $ix = $x;
   my $x_prev = $x;
+  my $uni;
 
-  for my $ch (split //, $str) {
-    if ($ch eq "\n") {    # TODO: \r, \t, \v, \f, etc?
+  while ($str) {
+    $rv = tb_utf8_char_to_unicode(\$uni, $str);
+    if ($rv < 0) {
+      $uni = 0xfffd;            # replace invalid UTF-8 char with U+FFFD
+      bytes::substr($str, 0, -$rv, '');
+    } elsif ($rv > 0) {
+      bytes::substr($str, 0, $rv, '');
+    } else {
+      last; # shouldn't get here
+    }
+
+    if ($uni eq ord("\n")) {    # TODO: \r, \t, \v, \f, etc?
       $x = $ix;
       $x_prev = $x;
       $y++;
       next;
     }
 
-    if (!tb_iswprint_ex(ord($ch), \$w)) {
-      $ch = "\x{fffd}";    # replace non-printable with U+FFFD
+    if (!tb_iswprint_ex($uni, \$w)) {
+      $uni = 0xfffd;            # replace non-printable with U+FFFD
       $w = 1;
     }
 
-    return TB_ERR if $w < 0;    # shouldn't happen if iswprint
-
-    # C termbox2 behavior: if a wide glyph doesn't fit to EOL, render spaces.
-    my $cols_left = ($back->{width} // 0) - $x;
-    if ($w > 1 && $cols_left > 0 && $w > $cols_left) {
-      $ch = ' ';
-      $w = 1;
+    if ($w < 0) {
+      return TB_ERR;            # shouldn't happen if iswprint
     }
-
-    if ($w == 0) {    # combining character
+    elsif ($w == 0) {           # combining character
       if ($back->in_bounds($x_prev, $y)) {
-        $rv = tb_extend_cell($x_prev, $y, ord($ch));
+        $rv = tb_extend_cell($x_prev, $y, $uni);
         return $rv if $rv != TB_OK;
       }
-      next;
     }
-
-    if ($back->in_bounds($x, $y)) {
-      my $cell = $back->get($x, $y) // return TB_ERR;
-      # w == 1: ordinary single-cell glyph.
-      $rv = $cell->set($ch, $fg, $bg);
-      return $rv if $rv != TB_OK;
-
-      if ($w > 1) {
-        # w > 1: mark W-1 following cells as continuation (U+0000).
-        for my $dx (1 .. $w - 1) {
-          next unless $back->in_bounds($x + $dx, $y);
-          my $cont = $back->get($x + $dx, $y) // return TB_ERR;
-          $rv = $cont->set("\0", $fg, $bg);
-          return $rv if $rv != TB_OK;
-        }
+    else {
+      if ($back->in_bounds($x, $y)) {
+        my $cell = $back->get($x, $y) // return TB_ERR;
+        $rv = $cell->set(chr($uni), $fg, $bg);
+        return $rv if $rv != TB_OK;
       }
+      $x_prev = $x;
+      $x += $w;
+      $$out_w += $w if defined($out_w);
     }
-
-    $x_prev = $x;
-    $x += $w;
-    $$out_w += $w if defined($out_w);
   }
 
   return TB_OK;
@@ -1635,10 +1696,24 @@ sub tb_utf8_char_length {    # $length ($c)
   my ($c) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => '', strict_type => 1 },
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+      1 => { required => 1, defined => 1, default => '', strict_type => 1 },
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
+  } else {
+    $c //= '';
   }
-  return bytes::length($c);
+  return 0 if $c eq '';
+  $c = bytes::substr($c, 0, 1);
+  state $utf8_length = {};
+  $utf8_length->{$c} //= do {
+    my $b = unpack('C', $c);
+      ($b < 0xC0) ? 1
+    : ($b < 0xE0) ? 2
+    : ($b < 0xF0) ? 3
+    : ($b < 0xF8) ? 4
+    : ($b < 0xFC) ? 5
+    : ($b < 0xFE) ? 6
+    :               1;
+  };
 }
 
 sub tb_utf8_char_to_unicode {    # $length (\$out, $c)
@@ -1646,28 +1721,75 @@ sub tb_utf8_char_to_unicode {    # $length (\$out, $c)
   if (STRICT) {
     check {
       1 => { required => 1, default => \0, strict_type => 1 },
-      2 => { required => 1, default => '', strict_type => 1 },
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
+  } else {
+    $c //= '';
   }
-  return 0 if !defined($c) || $c eq '';
-  utf8::upgrade($c);
-  return TB_ERR if length($c) != 1;
-  $$out = ord($c);
-  return bytes::length($c);
+  use bytes;
+
+  return 0 if $c eq '';
+  my $b0  = substr($c, 0, 1);
+  return 0 if $b0 eq "\0";
+  my $len = tb_utf8_char_length($b0);
+
+  my @c = unpack('C*', substr($c, 0, $len));
+
+  state $utf8_mask = [0x7F, 0x1F, 0x0F, 0x07, 0x03, 0x01];
+  my $mask = $utf8_mask->[$len - 1] // 0x7F;
+
+  my $result = $c[0] & $mask;
+
+  my $i;
+  for ($i = 1; $i < @c && $c[$i] != 0; $i++) {
+    $result <<= 6;
+    $result |= $c[$i] & 0x3F;
+  }
+
+  return -$i if $i != $len;
+
+  $$out = $result;
+  return $len;
 }
 
 sub tb_utf8_unicode_to_char {    # $length (\$out, $c)
   my ($out, $c) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \0, strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+      1 => { required => 1, default => \'', strict_type => 1 },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
+  } else {
+    $c //= 0;
   }
-  my $s = chr($c);
-  $$out = $s;
-  utf8::upgrade($s) unless $c < 0x80;
-  return bytes::length($s);
+
+  # Fast path for real Unicode scalar values (<= 0x10FFFF)
+  if ($c <= 0x10FFFF) {
+    my $s = chr($c);
+    utf8::encode($s);
+    $$out = $s;
+    return bytes::length($s);
+  }
+
+  # Fallback for "extended UTF-8" (5/6-byte), C-compatible behavior
+  my ($first, $len);
+
+  if    ($c < 0x80)      { $first = 0x00; $len = 1; }
+  elsif ($c < 0x800)     { $first = 0xC0; $len = 2; }
+  elsif ($c < 0x10000)   { $first = 0xE0; $len = 3; }
+  elsif ($c < 0x200000)  { $first = 0xF0; $len = 4; }
+  elsif ($c < 0x4000000) { $first = 0xF8; $len = 5; }
+  else                   { $first = 0xFC; $len = 6; }
+
+  my @out = (0) x $len;
+  for (my $i = $len - 1; $i > 0; --$i) {
+    $out[$i] = ($c & 0x3F) | 0x80;
+    $c >>= 6;
+  }
+  $out[0] = $c | $first;
+  $$out = pack('C*', @out);
+
+  return $len;
 }
 
 #
@@ -1683,7 +1805,7 @@ sub tb_strerror {    # $str ($err)
   my ($err) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   switch: for (int($err)) {
@@ -1779,7 +1901,7 @@ sub tb_iswprint {    # $int ($codepoint)
   my ($codepoint) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
   return tb_iswprint_ex($codepoint, undef);
@@ -1789,7 +1911,7 @@ sub tb_wcwidth {    # $int ($codepoint)
   my ($codepoint) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
   }
   if (TB_OPT_LIBC_WCHAR) {
@@ -1836,6 +1958,8 @@ sub tb_reset {    # $int ()
     input_mode    => TB_INPUT_ESC,
     output_mode   => TB_OUTPUT_NORMAL,
 
+    terminfo      => '',
+
     caps          => [ (undef) x TB_CAP__COUNT ],
     cap_trie      => captrie->new(),
 
@@ -1855,13 +1979,35 @@ sub tb_reset {    # $int ()
   return TB_OK;
 }
 
+sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $fmt, @args)
+  my ($x, $y, $fg, $bg, $out_w, $fmt, @args) = @_;
+  if (STRICT) {
+    check {
+      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      5 => { required => 1, default => \0, strict_type => 1 },
+      6 => { required => 1, defined => 1, default => '', strict_type => 1 },
+    } => { map { $_ => $_[$_-1] } 1..6 } or return TB_ERR;
+  }
+
+  my $str;
+  local $@;
+  try: eval {
+    use warnings FATAL => 'all';
+    $str = sprintf($fmt, @args);
+  }; 
+  return TB_ERR 
+    if !defined($str) || length($str) >= TB_OPT_PRINTF_BUF;
+
+  return tb_print_ex($x, $y, $fg, $bg, $out_w, $str);
+}
+
 sub tb_deinit {    # $int ()
   @_ == 0 or return TB_ERR;
 
-  if (defined($global->{caps}[0])
-   && defined($global->{wfd})
-   && $global->{wfd} >= 0
-  ) {
+  if (defined($global->{caps}[0]) && $global->{wfd} >= 0) {
     bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_SHOW_CURSOR]);
     bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_SGR0]);
     bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_CLEAR_SCREEN]);
@@ -1871,33 +2017,31 @@ sub tb_deinit {    # $int ()
     bytebuf_flush(\$global->{outbuf}, $global->{wfd});
   }
 
-  if (defined($global->{ttyfd}) && $global->{ttyfd} >= 0) {
-    if ($global->{has_orig_tios} && defined($global->{orig_tios})) {
-      eval {
-        POSIX::tcsetattr($global->{ttyfd}, POSIX::TCSAFLUSH(), 
-          $global->{orig_tios});
-        1;
-      };
+  if ($global->{ttyfd} >= 0) {
+    if ($global->{has_orig_tios}) {
+      $global->{orig_tios}->setattr($global->{ttyfd}, TCSAFLUSH);
     }
     if ($global->{ttyfd_open}) {
-      eval { POSIX::close($global->{ttyfd}); 1 };
+      POSIX::close($global->{ttyfd});
       $global->{ttyfd_open} = 0;
+      $global->{ttyfd} = -1;
     }
   }
 
-  for my $fd (@{ $global->{resize_pipe} || [] }) {
-    next unless defined($fd) && $fd >= 0;
-    eval { POSIX::close($fd); 1 };
+  $SIG{'WINCH'} = 'DEFAULT';
+  foreach my $fd (@{ $global->{resize_pipe}}) {
+    POSIX::close($fd) if $fd >= 0;
   }
 
   cellbuf_free($global->{back});
   cellbuf_free($global->{front});
-
   bytebuf_free(\$global->{inbuf});
   bytebuf_free(\$global->{outbuf});
 
+  $global->{terminfo} = '' if $global->{terminfo};
+
   my $rv = $global->{cap_trie}->clear() if $global->{cap_trie};
-  return $rv if defined($rv) && $rv != TB_OK;
+  return $rv if $rv != TB_OK;
 
   tb_reset();
   return TB_OK;
@@ -1907,7 +2051,7 @@ sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
   my ($ch, $width) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
       2 => { required => 0, default => \undef, strict_type => 1 },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
@@ -1941,11 +2085,9 @@ sub tb_cluster_width {    # $int (\@cluster, $nch)
   if (STRICT) {
     check {
       1 => { required => 1, default => [], strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
     return -1 if $nch != @$cluster;
-  } else {
-    return -1 unless ref $cluster && looks_like_number $nch;
   }
   
   my $wmax = -1;
@@ -1971,27 +2113,344 @@ sub tb_cluster_width {    # $int (\@cluster, $nch)
   return $wmax;
 }
 
-sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $fmt, @args)
-  my ($x, $y, $fg, $bg, $out_w, $fmt, @args) = @_;
-  if (STRICT) {
-    check {
-      1 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      5 => { required => 1, default => \0, strict_type => 1 },
-      6 => { required => 1, default => '', strict_type => 1 },
-    } => { map { $_ => $_[$_-1] } 1..6 } or return TB_ERR;
+#
+# Terminal initialization helpers
+#
+
+sub init_term_attrs {    # $int ()
+  @_ == 0 or return TB_ERR;
+
+  return TB_OK if $global->{ttyfd} < 0;
+
+  $global->{orig_tios} = POSIX::Termios->new() // return TB_ERR_TCGETATTR;
+
+  if (!defined $global->{orig_tios}->getattr($global->{ttyfd})) {
+    $global->{last_errno} = 0+ $!;
+    return TB_ERR_TCGETATTR;
   }
 
-  my $str = eval {
-    use warnings FATAL => 'all';
-    sprintf($fmt, @args);
-  };
-  return TB_ERR 
-    if !defined($str) || length($str) >= TB_OPT_PRINTF_BUF;
+  my $tios = $global->{orig_tios}->$clone() // return TB_ERR_TCSETATTR;
+  $global->{has_orig_tios} = 1;
 
-  return tb_print_ex($x, $y, $fg, $bg, $out_w, $str);
+  cfmakeraw($tios);
+  $tios->setcc(VMIN,  1);
+  $tios->setcc(VTIME, 0);
+
+  if (!defined $tios->setattr($global->{ttyfd}, TCSAFLUSH)) {
+    $global->{last_errno} = 0+ $!;
+    return TB_ERR_TCSETATTR;
+  }
+
+  return TB_OK;
+}
+
+sub init_term_caps {    # $int ()
+  @_ == 0 or return TB_ERR;
+  if (load_terminfo() == TB_OK) {
+    return parse_terminfo_caps();
+  }
+  return load_builtin_caps();
+}
+
+#
+# Terminfo parsing helpers
+#
+
+sub load_terminfo {    # $int ()
+  @_ == 0 or return TB_ERR;
+
+  my $rv;
+
+  # See terminfo(5) "Fetching Compiled Descriptions" for a description of
+  # this behavior. Some of these paths are compile-time ncurses options, so
+  # best guesses are used here.
+  my $term = $ENV{TERM};
+  return TB_ERR unless $term;
+
+  # If TERMINFO is set, try that directory first
+  if (defined(my $terminfo = $ENV{"TERMINFO"})) {
+    $rv = load_terminfo_from_path($terminfo, $term);
+    return $rv if $rv == TB_OK;
+  }
+
+  # Next try ~/.terminfo
+  if (defined(my $home = $ENV{"HOME"})) {
+    my $tmp = "$home/.terminfo";
+
+    return TB_ERR if length($tmp) >= TB_PATH_MAX;
+
+    $rv = load_terminfo_from_path($tmp, $term);
+    return $rv if $rv == TB_OK;
+  }
+
+  # Next try TERMINFO_DIRS
+  #
+  # Note, empty entries are supposed to be interpretted as the "compiled-in
+  # default", which is of course system-dependent. Previously /etc/terminfo
+  # was used here. Let's skip empty entries altogether rather than give
+  # precedence to a guess, and check common paths after this loop.
+  if (defined(my $dirs = $ENV{"TERMINFO_DIRS"})) {
+    return TB_ERR if length($dirs) >= TB_PATH_MAX;
+    foreach my $dir (split /:/, $dirs, -1) {
+      next if $dir eq '';
+      $rv = load_terminfo_from_path($dir, $term);
+      return $rv if $rv == TB_OK;
+    }
+  }
+
+  # Try compile-time terminfo directory if available
+  if (defined TB_TERMINFO_DIR) {
+    $rv = load_terminfo_from_path(TB_TERMINFO_DIR, $term);
+    return $rv if $rv == TB_OK;
+  }
+
+  foreach my $dir (qw(
+    /usr/local/etc/terminfo
+    /usr/local/share/terminfo
+    /usr/local/lib/terminfo
+    /etc/terminfo
+    /usr/share/terminfo
+    /usr/lib/terminfo
+    /usr/share/lib/terminfo
+    /lib/terminfo
+  )) {
+    $rv = load_terminfo_from_path($dir, $term);
+    return $rv if $rv == TB_OK;
+  }
+
+  return TB_ERR;
+}
+
+sub load_terminfo_from_path {    # $int ($path, $term)
+  my ($path, $term) = @_;
+  if (STRICT) {
+    check {
+      1 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      2 => { required => 1, defined => 1, allow => qr/.+/ },
+    } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
+  } else {
+    $path // return TB_ERR;
+    $term // return TB_ERR;
+  }
+  my $rv;
+  my $tmp;
+
+  # Look for term at this terminfo location, e.g., <terminfo>/x/xterm
+  $tmp = "$path/" . substr($term, 0, 1) . "/$term";
+  return TB_ERR if length($tmp) >= TB_PATH_MAX;
+
+  $rv = read_terminfo_path($tmp);
+  return $rv if $rv == TB_OK;
+
+  if ($^O eq 'darwin') {
+    # Try the Darwin equivalent path, e.g., <terminfo>/78/xterm
+    $tmp = "$path/" . sprintf('%x', ord(substr($term, 0, 1))) . "/$term";
+    return TB_ERR if length($tmp) >= TB_PATH_MAX;
+
+    return read_terminfo_path($tmp);
+  }
+
+  return TB_ERR;
+}
+
+sub read_terminfo_path {    # $int ($path)
+  my ($path) = @_;
+  if (STRICT) {
+    check {
+      1 => { required => 1, defined => 1, default => '', strict_type => 1 },
+    } => { map { $_ => $_[$_-1] } 1..1 } or return TB_ERR;
+  } else {
+    $path // return TB_ERR;
+  }
+
+  open(my $fp, '<:raw', $path)
+    or return TB_ERR;
+
+  my @st = stat($fp);
+  if (!@st) {
+    close($fp);
+    return TB_ERR;
+  }
+
+  my $fsize = $st[7];
+
+  my $data = '';
+  my $nread = sysread($fp, $data, $fsize);
+
+  if (!defined($nread) || $nread != $fsize) {
+    close($fp);
+    return TB_ERR;
+  }
+
+  $global->{terminfo} = $data;
+
+  close($fp);
+  return TB_OK;
+}
+
+sub parse_terminfo_caps {    # $int ()
+  @_ == 0 or return TB_ERR;
+
+  my $terminfo = $global->{terminfo};
+  my $nterminfo = length($terminfo) // 0;
+
+  # Ensure there's at least a header's worth of data
+  return TB_ERR if $nterminfo < 6 * INT16_SIZE;
+
+  my $terminfo_cap_indexes = eval {
+    no warnings 'once';
+    require Termbox::PP::Terminfo::Builtin;
+    \@Termbox::PP::Terminfo::Builtin::terminfo_cap_indexes; 
+  } or return TB_ERR;
+
+  my ($magic_number, $nbytes_names, $nbytes_bools, $num_ints, $num_offsets, 
+    $nbytes_strings);
+
+  # header[0] the magic number (octal 0432 or 01036)
+  # header[1] the size, in bytes, of the names section
+  # header[2] the number of bytes in the boolean section
+  # header[3] the number of short integers in the numbers section
+  # header[4] the number of offsets (short integers) in the strings section
+  # header[5] the size, in bytes, of the string table
+  get_terminfo_int16(0 * INT16_SIZE, \$magic_number);
+  get_terminfo_int16(1 * INT16_SIZE, \$nbytes_names);
+  get_terminfo_int16(2 * INT16_SIZE, \$nbytes_bools);
+  get_terminfo_int16(3 * INT16_SIZE, \$num_ints);
+  get_terminfo_int16(4 * INT16_SIZE, \$num_offsets);
+  get_terminfo_int16(5 * INT16_SIZE, \$nbytes_strings);
+
+  # Legacy ints are 16-bit, extended ints are 32-bit
+  my $bytes_per_int = $magic_number == 01036 ? 4     # 32-bit
+                                             : 2;    # 16-bit
+
+  # Between the boolean section and the number section, a null byte will be
+  # inserted, if necessary, to ensure that the number section begins on 
+  # an even byte
+  my $align_offset = (($nbytes_names + $nbytes_bools) % 2 != 0) ? 1 : 0;
+
+  my $nbytes_header = 6 * INT16_SIZE;
+  my $pos_str_offsets =
+      $nbytes_header    # header (12 bytes)
+    + $nbytes_names     # length of names section
+    + $nbytes_bools     # length of boolean section
+    + $align_offset
+    + ($num_ints * $bytes_per_int);    # length of string offsets section
+
+  my $pos_str_table =
+      $pos_str_offsets
+    + ($num_offsets * INT16_SIZE);    # length of string offsets table
+
+  $global->{caps} ||= [];
+
+  # Load caps
+  for (my $i = 0; $i < TB_CAP__COUNT; $i++) {
+    my $cap = get_terminfo_string($pos_str_offsets, $num_offsets,
+      $pos_str_table, $nbytes_strings, $terminfo_cap_indexes->[$i]);
+    # Something is not right
+    return TB_ERR 
+      unless defined $cap;
+    $global->{caps}->[$i] = $cap;
+  }
+
+  return TB_OK;
+}
+
+sub load_builtin_caps {    # $int ()
+  @_ == 0 or return TB_ERR;
+  my $term = $ENV{"TERM"};
+
+  return TB_ERR_NO_TERM unless $term;
+
+  my $builtin_terms = do {
+    require Termbox::PP::Terminfo::Builtin;
+    no warnings 'once';
+    \%Termbox::PP::Terminfo::Builtin::builtin_terms;
+  } or return TB_ERR;
+  my $builtin_terms_orders = do {
+    require Termbox::PP::Terminfo::Builtin;
+    no warnings 'once';
+    \@Termbox::PP::Terminfo::Builtin::builtin_terms_orders;
+  } or return TB_ERR;
+
+  # Check for exact TERM match
+  if (exists $builtin_terms->{$term}) {
+    my $caps = $builtin_terms->{$term};
+    @{ $global->{caps} } = @$caps[0 .. TB_CAP__COUNT - 1];
+    return TB_OK;
+  }
+
+  # Check for partial TERM or alias match
+  foreach my $name (@$builtin_terms_orders) {
+    next if index($term, $name) < 0;
+    next unless exists $builtin_terms->{$name};
+
+    my $caps = $builtin_terms->{$name};
+    @{ $global->{caps} } = @$caps[0 .. TB_CAP__COUNT - 1];
+    return TB_OK;
+  }
+
+  return TB_ERR_UNSUPPORTED_TERM;
+}
+
+sub get_terminfo_string {    # $str|undef ($offsets_pos, $offsets_len, $table_pos, $table_size, $index)
+  my ($offsets_pos, $offsets_len, $table_pos, $table_size, $index) = @_;
+  if (STRICT) {
+    check {
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+    } => { map { $_ => $_[$_-1] } 1..5 } or return undef;
+  }
+
+  if ($index >= $offsets_len) {
+    # An index beyond the offset table indicates absent
+    # See 'convert_strings' in tinfo 'read_entry.c'
+    return '';
+  }
+
+  my $table_offset;
+  my $table_offset_offset = $offsets_pos + ($index * INT16_SIZE);
+  if (get_terminfo_int16($table_offset_offset, \$table_offset) != TB_OK) {
+    # offset beyond end of terminfo entry
+    # Truncated/corrupt terminfo entry?
+    return undef;
+  }
+
+  if ($table_offset < 0 || $table_offset >= $table_size) {
+    # A negative offset indicates absent
+    # An offset beyond the string table indicates absent
+    # See 'convert_strings' in tinfo 'read_entry.c'
+    return '';
+  }
+
+  my $str_offset = $table_pos + $table_offset;
+  if ($str_offset >= length($global->{terminfo})) {
+    # string beyond end of terminfo entry
+    # Truncated/corrupt terminfo entry?
+    return undef;
+  }
+
+  my $str = substr($global->{terminfo}, $str_offset);
+  my $len = index($str, "\0");
+  return $len >= 0 ? substr($str, 0, $len) : undef;
+}
+
+sub get_terminfo_int16 {    # $int ($offset, \$val)
+  my ($offset, $val) = @_;
+  if (STRICT) {
+    check {
+      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      2 => { required => 1, default => \0, strict_type => 1 },
+    } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
+  }
+  if ($offset < 0 || $offset + INT16_SIZE > length($global->{terminfo})) {
+    $$val = -1;
+    return TB_ERR;
+  }
+  $$val = unpack('s<', substr($global->{terminfo}, $offset, INT16_SIZE));
+  return TB_OK;
 }
 
 #
@@ -2003,16 +2462,31 @@ sub init_cap_trie {    # $int ()
   my $rv = $trie->clear();
   return $rv if $rv != TB_OK;
 
+  my $builtin_mod_caps = eval {
+    no warnings 'once';
+    require Termbox::PP::Terminfo::Builtin;
+    \%Termbox::PP::Terminfo::Builtin::builtin_mod_caps; 
+  } or return TB_ERR;
+
   # Add caps from terminfo or built-in
+  # Collisions are expected as some terminfo entries have dupes. (For
+  # example, att605-pc collides on TB_CAP_F4 and TB_CAP_DELETE.) First cap
+  # in TB_CAP_* index order will win.
+  #
+  # TODO: Reorder TB_CAP_* so more critical caps come first.
   for my $i (0 .. TB_CAP__COUNT_KEYS - 1) {
     $rv = $trie->add($global->{caps}[$i], tb_key_i($i), 0);
     return $rv if $rv != TB_OK && $rv != TB_ERR_CAP_COLLISION;
   }
 
-  # Optional extension point: caller can pre-fill this list with
-  # [cap, key, mod] tuples before init_cap_trie().
-  for my $row (@{ $global->{builtin_mod_caps} || [] }) {
-    my ($cap, $key, $mod) = @$row;
+  # Add built-in mod caps
+  #
+  # Collisions are OK here as well. This can happen if $global->{caps} collides
+  # with builtin_mod_caps. It is desirable to give precedence to $global->{caps}
+  # here.
+  while (my ($cap, $entry) = each %$builtin_mod_caps) {
+    my $key = $entry->{key} // next;
+    my $mod = $entry->{mod} // next;
     $rv = $trie->add($cap, $key, $mod);
     return $rv if $rv != TB_OK && $rv != TB_ERR_CAP_COLLISION;
   }
@@ -2023,22 +2497,21 @@ sub init_cap_trie {    # $int ()
 # Regex/prefix equivalent of termbox2's cap_trie_add.
 sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
   my ($cap, $key, $mod) = @_;
-  $global->{cap_trie} //= captrie->new();
-  return $global->{cap_trie}->add($cap, $key, $mod);
+  my $trie = $global->{cap_trie} or return TB_ERR;
+  return $trie->add($cap, $key, $mod);
 }
 
 # Regex/prefix equivalent of termbox2's cap_trie_find.
 # Returns a hash-ref node in $$last with {is_leaf,key,mod,nchildren,cap}.
 sub cap_trie_find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
   my ($buf, $nbuf, $last, $depth) = @_;
-  $global->{cap_trie} //= captrie->new();
-  return $global->{cap_trie}->find($buf, $nbuf, $last, $depth);
+  my $trie = $global->{cap_trie} or return TB_ERR;
+  return $trie->find($buf, length($buf), $last, $depth);
 }
 
 sub cap_trie_deinit {    # $int ($node|undef)
   my ($node) = @_;
-  $node ||= $global->{cap_trie};
-  $node ||= captrie->new();
+  return TB_OK unless $node;
   return $node->clear();
 }
 
@@ -2046,29 +2519,101 @@ sub cap_trie_deinit {    # $int ($node|undef)
 # Event extraction helpers
 #
 
-sub extract_esc_cap {
+sub extract_event {   # $int ($event)
   my ($event) = @_;
-  my $trie = $global->{cap_trie} //= captrie->new();
-  my $node;
-  my $depth = 0;
-  my $in = $global->{inbuf} // '';
+  if (STRICT) {
+    check {
+      1 => { required => 1, allow => \&blessed },
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  }
+  my $trie = $global->{cap_trie};
+  alias: for my $in ($global->{inbuf}) {
 
-  my $rv = $trie->find($in, length($in), \$node, \$depth);
-  return $rv if $rv != TB_OK;
+  return TB_ERR unless length($in);
 
-  if ($node->is_leaf) {
+  use bytes;
+  my $b0 = substr($in, 0, 1);
+  if ($b0 eq "\e") {
+    # Escape sequence?
+    # In TB_INPUT_ESC, skip if the buffer is a single escape char
+    unless (($global->{input_mode} & TB_INPUT_ESC) && length($in) == 1) {
+      my $rv = extract_esc($event);
+      return $rv if $rv != TB_OK && $rv != TB_ERR_NEED_MORE;
+    }
+
+    # Escape key?
+    if ($global->{input_mode} & TB_INPUT_ESC) {
+      $event->{type} = TB_EVENT_KEY;
+      $event->{ch} = 0;
+      $event->{key} = TB_KEY_ESC;
+      $event->{mod} = 0;
+      substr($in, 0, 1, '');
+      return TB_OK;
+    }
+
+    # Recurse for alt key
+    $event->{mod} |= TB_MOD_ALT;
+    substr($in, 0, 1, '');
+    return extract_event($event);
+  }
+
+  # ASCII control key?
+  my $is_ctrl = ord($b0) < TB_KEY_SPACE || ord($b0) == TB_KEY_BACKSPACE2;
+  if ($is_ctrl) {
     $event->{type} = TB_EVENT_KEY;
     $event->{ch} = 0;
-    $event->{key} = $node->key;
-    $event->{mod} = $node->mod;
-    substr($global->{inbuf}, 0, $depth, '');
+    $event->{key} = ord($in);
+    $event->{mod} |= TB_MOD_CTRL;
+    substr($in, 0, 1, '');
     return TB_OK;
   }
-  elsif ($node->nchildren > 0 && length($in) <= $depth) {
+
+  # UTF-8?
+  my $need = tb_utf8_char_length($b0);
+  if (length($in) >= $need) {
+    $event->{type} = TB_EVENT_KEY;
+    tb_utf8_char_to_unicode(\$event->{ch}, $in);
+    $event->{key} = 0;
+    substr($in, 0, $need, '');
+    return TB_OK;
+  }
+
+  # Need more input
+  return TB_ERR
+  } #/ alias:
+}
+
+sub extract_esc_cap {
+  my ($event) = @_;
+  if (STRICT) {
+    check {
+      1 => { required => 1, allow => \&blessed },
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  }
+  my $trie = $global->{cap_trie};
+  alias: for my $in ($global->{inbuf}) {
+  my $node;
+  my $depth;
+
+  my $rv = $trie->find($in, \$node, \$depth);
+  return $rv if $rv != TB_OK;
+
+  if ($node->{is_leaf}) {
+    # Found a leaf node
+    $event->{type} = TB_EVENT_KEY;
+    $event->{ch}  = 0;
+    $event->{key} = $node->{key};
+    $event->{mod} = $node->{mod};
+    substr($in, 0, $depth, '');
+    return TB_OK;
+  }
+  elsif ($node->{nchildren} > 0 && length($in) <= $depth) {
+    # Found a branch node (not enough input)
     return TB_ERR_NEED_MORE;
   }
 
   return TB_ERR;
+  } #/ alias:
 }
 
 #
@@ -2089,16 +2634,15 @@ sub cell_set {    # $int ($cell, $ch, $nch, $fg, $bg)
     check {
       1 => { required => 1, allow => \&blessed },
       2 => { required => 1, default => [], strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      5 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+    return TB_ERR if @$ch != $nch;
+  } else {
+    ref $ch or return TB_ERR;
   }
-  my $str = eval {
-    use warnings FATAL => 'all';
-    pack('U*', @$ch[0 .. $nch-1]);
-  } // return TB_ERR;
-  return $cell->set($str, $fg, $bg);
+  return $cell->set(pack('U*', @$ch), $fg, $bg);
 }
 
 sub cell_reserve_ech {    # $int ($cell, $n)
@@ -2106,7 +2650,7 @@ sub cell_reserve_ech {    # $int ($cell, $n)
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_OPT_EGC ? TB_OK : TB_ERR;
@@ -2179,8 +2723,8 @@ sub cellbuf_get {    # $int ($c, $x, $y, \$out)
   if (STRICT) {
     check {
       1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
       4 => { required => 1, allow => \&CORE::ref },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
@@ -2204,8 +2748,8 @@ sub send_literal {   # $int ($rv, $a)
   my ($rv, $a) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, default => '', strict_type => 1 },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $global->{outbuf} .= $a;
@@ -2216,9 +2760,9 @@ sub send_num {   # $int ($rv, \$buf, $n)
   my ($rv, $buf, $n) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
       2 => { required => 1, default => \'', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $global->{outbuf} .= sprintf('%u', $n);
@@ -2261,8 +2805,8 @@ sub send_attr {    # $int ($fg, $bg)
   my ($fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
   }
   my $rv;
@@ -2396,10 +2940,10 @@ sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
   my ($cfg, $cbg, $fg_is_default, $bg_is_default) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
-      3 => { required => 1, default => 0, allow => qr/^[01]?$/ },
-      4 => { required => 1, default => 0, allow => qr/^[01]?$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      3 => { required => 1, default => 0, allow => qr/\A[01]?\z/ },
+      4 => { required => 1, default => 0, allow => qr/\A[01]?\z/ },
     } => { map { $_ => $_[$_-1] } 1..4 } or return TB_ERR;
   }
   my $rv;
@@ -2478,8 +3022,8 @@ sub send_cursor_if {    # $int ($x, $y)
   my ($x, $y) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my $rv;
@@ -2497,9 +3041,9 @@ sub send_char {    # $int ($x, $y, $ch)
   my ($x, $y, $ch) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return send_cluster($x, $y, [$ch], 1);
@@ -2509,13 +3053,13 @@ sub send_cluster {    # $int ($x, $y, \@ch, $nch)
   my ($x, $y, $ch, $nch) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
-      2 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
       3 => { required => 1, default => [], strict_type => 1 },
-      4 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+    return TB_ERR if @$ch != $nch;
   }
-  return TB_ERR if @$ch != $nch;
 
   if ($global->{last_x} != $x - 1 || $global->{last_y} != $y) {
     my $rv = send_cursor_if($x, $y);
@@ -2524,10 +3068,12 @@ sub send_cluster {    # $int ($x, $y, \@ch, $nch)
   $global->{last_x} = $x;
   $global->{last_y} = $y;
 
-  foreach my $cp (@$ch) {
-    $global->{outbuf} .= tb_iswprint_ex($cp, undef)
-      ? chr($cp)
-      : "\x{fffd}";    # replace non-printable codepoints with U+FFFD
+  foreach my $ch32 (@$ch) {
+    if (!tb_iswprint_ex($ch32, undef)) {
+      $ch32 = 0xfffd;    # replace non-printable codepoints with U+FFFD
+    }
+    my $cu8_len = tb_utf8_unicode_to_char(\my $chu8, $ch32);
+    $global->{outbuf} .= $chu8;
   }
 
   return TB_OK;
@@ -2537,13 +3083,12 @@ sub convert_num {    # $len ($num, \$buf)
   my ($num, $buf) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
       2 => { required => 1, default => \'', strict_type => 1 },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
   }
-  use bytes;
   $$buf = sprintf('%u', $num);
-  return length($$buf);
+  return bytes::length($$buf);
 }
 
 #
@@ -2555,12 +3100,11 @@ sub bytebuf_puts {    # $int (\$buf, $str|undef)
   if (STRICT) {
     check {
       1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, default => '', strict_type => 1 },
+      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   # Nothing to do for empty caps
-  use bytes;
-  $$b .= $str if defined($str) && length($str);
+  $$b .= $str if defined($str) && bytes::length($str);
   return TB_OK
 }
 
@@ -2569,12 +3113,11 @@ sub bytebuf_nputs {    # $int (\$buf, $str, $nstr)
   if (STRICT) {
     check {
       1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, default => '', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
-  use bytes;
-  $$b .= substr($str, 0, $nstr);
+  $$b .= bytes::substr($str, 0, $nstr);
   return TB_OK;
 }
 
@@ -2583,7 +3126,7 @@ sub bytebuf_shift {    # $int (\$buf, $n)
   if (STRICT) {
     check {
       1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   use bytes;
@@ -2597,7 +3140,7 @@ sub bytebuf_flush {    # $int (\$buf, $fd)
   if (STRICT) {
     check {
       1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/^[-]?\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   use bytes;
@@ -2617,7 +3160,7 @@ sub bytebuf_reserve {    # $int (\$buf, $sz)
   if (STRICT) {
     check {
       1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/^\d+$/ },
+      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_OK;

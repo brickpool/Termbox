@@ -44,6 +44,8 @@ subtest 'pre-init status checks' => sub {
 };
 
 subtest 'set-cell APIs after init' => sub {
+  local $SIG{__WARN__} = sub { };
+
   $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
@@ -57,11 +59,7 @@ subtest 'set-cell APIs after init' => sub {
   $rv = Termbox::tb_set_cell(0, 0, ord('A'), 0, 0);
   is($rv, TB_OK(), 'tb_set_cell writes one codepoint');
 
-  my $cells;
-  {
-    local $SIG{__WARN__} = sub { };
-    $cells = Termbox::tb_cell_buffer();
-  }
+  my $cells = Termbox::tb_cell_buffer();
   is($cells->[0]->{ch}, 'A', 'tb_set_cell stores expected text');
 
   $rv = Termbox::tb_set_cell_ex(0, 0, [ord('A'), 0x0301], 2, 0, 0);

@@ -6,7 +6,10 @@ use Test::More;
 
 BEGIN {
   require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :return );
+  use_ok 'Termbox', qw(
+    :return
+    TB_CAP__COUNT
+  );
 }
 
 sub valid_preinit_status {
@@ -52,7 +55,7 @@ subtest 'send_* APIs after init' => sub {
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
   $Termbox::global->{outbuf} = '';
-  $Termbox::global->{caps} = [ ("A") x 32 ];
+  $Termbox::global->{caps} = [ ("A") x TB_CAP__COUNT() ];
   $Termbox::global->{wfd} = -1;
   $Termbox::global->{last_fg} = 1;
   $Termbox::global->{last_bg} = 2;

@@ -101,6 +101,7 @@ subtest 'tb_reset - initialization state' => sub {
 note 'Terminal deinitialization';
 # ------------------------------
 subtest 'tb_deinit - cleanup operations' => sub {
+  local $SIG{__WARN__} = sub { };
   plan tests => 3;
   
   # tb_deinit should clean up resources
