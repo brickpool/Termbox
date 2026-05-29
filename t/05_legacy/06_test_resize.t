@@ -15,9 +15,11 @@ use POSIX qw( dup2 getpid );
 
 if ($^O eq 'MSWin32') {
   plan skip_all => 'Test irrelevant for Windows OS';
-}
-else {
-  plan tests => 9;
+} else {
+  my $has_tty = !$ENV{AUTOMATED_TESTING} && -w '/dev/tty';
+  if (!$has_tty) {
+    plan skip_all => 'Test requires a TTY device (not available)';
+  }
 }
 
 dup2(fileno(STDERR), fileno(STDOUT));

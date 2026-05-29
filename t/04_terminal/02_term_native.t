@@ -1,9 +1,23 @@
 use 5.014;
+use strict;
 use warnings;
 
-use Test::More tests => 18;
+use Test::More;
 use Test::Exception;
 use POSIX qw( :fcntl_h );
+
+my $tty;
+if ($^O eq 'MSWin32') {
+  my $fd = fileno(\*STDERR);
+  if (!defined $fd || $fd < 0) {
+    plan skip_all => 'Test requires a valid console handle (not available)';
+  }
+  $tty = *STDERR;
+} else {
+  if (!sysopen($tty, "/dev/tty", O_WRONLY, 0)) {
+    plan skip_all => 'Test requires a writable /dev/tty (not available)';
+  }
+}
 
 use_ok 'Termbox::Go::Common', qw(
   :keys
@@ -14,30 +28,18 @@ use_ok 'Termbox::Go::Common', qw(
   :vars
 );
 use_ok 'Termbox::Go::Terminal::Backend', qw( 
+  :const
   :func
   :types
   :vars
 );
 
-our $out;
-if ($^O eq 'MSWin32') {
-  $out = \*STDERR;
-} else {
-  sysopen($out, "/dev/tty", O_WRONLY, 0);
-}
+our $out = $tty;
 our $outfd = fileno($out);
 our $back_buffer; $back_buffer->init(1,1);
 our $front_buffer; $front_buffer->init(1,1);
 my $sequence = "\x1b[MC\x95(";
 our $inbuf = 'abc';
-BEGIN {
-  if ($^O eq 'MSWin32') {
-    # Term::ReadKey::GetTerminalSize did not work if the handle was
-    # redirected or duplicated
-    $ENV{COLUMNS} ||= 80;
-    $ENV{LINES} ||= 24;
-  }
-}
 
 lives_ok { write_cursor(0, 0) } 'write_cursor';
 lives_ok { write_sgr_fg(ColorYellow()) } 'write_sgr_fg';
@@ -63,5 +65,16 @@ lives_ok { extract_raw_event(\(my $data = '1'), my $event = {}) or die }
   'extract_raw_event';
 lives_ok { extract_event(\(my $data = ''), my $event = {}, !!1) }
   'extract_event';
+
+my $invalid_utf8 = "\xFF";
+my %invalid_event = ( Type => EventKey() );
+is(
+  extract_event(\$invalid_utf8, \%invalid_event, !!1),
+  event_not_extracted(),
+  'extract_event invalid UTF-8 status'
+);
+ok(!exists($invalid_event{Ch}), 'extract_event invalid UTF-8 keeps Ch unset');
+ok(!exists($invalid_event{N}), 'extract_event invalid UTF-8 keeps N unset');
+ok(!exists($invalid_event{Key}), 'extract_event invalid UTF-8 keeps Key unset');
 
 done_testing;

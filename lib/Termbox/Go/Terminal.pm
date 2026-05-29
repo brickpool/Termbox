@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.6');
+our $VERSION = version->declare('v0.3.9');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -395,7 +395,7 @@ sub Flush { # $errno ()
         $x += $w;
         next;
       }
-      $front = { %$back };
+      $front_buffer->{cells}->[$cell_offset] = { %$back };
       send_attr($back->{Fg}, $back->{Bg});
 
       if ($w == 2 && $x == $front_buffer->{width} - 1) {

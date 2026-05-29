@@ -1,7 +1,7 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 12;
+use Test::More;
 
 use_ok 'Termbox::Go', qw( TB_IMPL );
 

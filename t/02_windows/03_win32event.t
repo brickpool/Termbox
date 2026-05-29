@@ -7,9 +7,6 @@ use Test::Exception;
 if ($^O ne 'MSWin32') {
   plan skip_all => 'Windows OS required for testing';
 }
-else {
-  plan tests => 6;
-}
 
 use_ok 'Win32API::File';
 use_ok 'Termbox::Go::Win32::Backend', qw(

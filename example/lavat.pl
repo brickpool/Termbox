@@ -72,6 +72,7 @@ sub main { # $ ($, @)
   srand(time());
 
   tb_init();
+  tb_set_input_mode(TB_INPUT_ESC);
 
   tb_hide_cursor();
 

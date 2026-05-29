@@ -1,7 +1,7 @@
 use 5.014;
 use warnings;
 
-use Test::More tests => 20;
+use Test::More;
 use Test::Exception;
 use Devel::StrictMode;
 use POSIX qw( :errno_h );

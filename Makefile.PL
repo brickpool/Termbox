@@ -1,7 +1,18 @@
 use strict;
 use warnings;
 
+use Config;
 use ExtUtils::MakeMaker;
+
+unless ($Config{useithreads}) { die <<"END";
+************************************************************
+ERROR: This Perl was built *without* thread support.
+
+Termbox::Go requires a threaded Perl (built with -Dusethreads).
+Please install a Perl with thread support and try again.
+************************************************************
+END
+}
 
 WriteMakefile1(
   NAME              => 'Termbox::Go',
