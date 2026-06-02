@@ -14,8 +14,12 @@ if ($^O eq 'MSWin32') {
   }
   $tty = *STDERR;
 } else {
-  if (!sysopen($tty, "/dev/tty", O_WRONLY, 0)) {
-    plan skip_all => 'Test requires a writable /dev/tty (not available)';
+  # POSIX: Check for a real terminal
+  unless (sysopen($tty, "/dev/tty", O_RDWR)) {
+    plan skip_all => 'Test requires /dev/tty (not available)';
+  }
+  unless (-t $tty) {
+    plan skip_all => 'Test requires a real TTY (not a pipe, FIFO, or stub)';
   }
 }
 

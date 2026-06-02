@@ -23,7 +23,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v1.1.1');
-our $VERSION = version->declare('v0.3.9');
+our $VERSION = version->declare('v0.3.10');
 
 # authority '...'
 our $authority = 'github:nsf';
@@ -338,7 +338,7 @@ sub Close { # $errno ()
   tcsetattr($outfd, $orig_tios);
 
   $SIG{'WINCH'} = 'DEFAULT';
-  $SIG{'IO'} = 'DEFAULT';
+  $SIG{'IO'} = 'IGNORE';
 
   close($out);
   close(IN);

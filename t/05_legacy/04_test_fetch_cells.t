@@ -4,23 +4,24 @@ use warnings;
 use Test::More;
 use Test::Exception;
 use Devel::StrictMode;
-use POSIX qw( dup2 );
+use POSIX qw( dup2 :fcntl_h );
 
 if ($^O eq 'MSWin32') {
   my $fd = fileno(\*STDERR);
-  my $has_console = !$ENV{AUTOMATED_TESTING} && defined $fd && $fd >= 0;
-  if (!$has_console) {
-    plan skip_all => 'Test requires a valid console (not available)';
+  if (!defined $fd || $fd < 0) {
+    plan skip_all => 'Test requires a valid console handle (not available)';
   }
+  dup2(fileno(STDERR), fileno(STDOUT));
 } else {
-  my $has_tty = !$ENV{AUTOMATED_TESTING} && -w '/dev/tty';
-  if (!$has_tty) {
-    plan skip_all => 'Test requires a TTY device (not available)';
+  # POSIX: Check for a real terminal
+  my $tty;
+  unless (sysopen($tty, "/dev/tty", O_RDWR)) {
+    plan skip_all => 'Test requires /dev/tty (not available)';
+  }
+  unless (-t $tty) {
+    plan skip_all => 'Test requires a real TTY (not a pipe, FIFO, or stub)';
   }
 }
-
-dup2(fileno(STDERR), fileno(STDOUT));
-$| = 1;
 
 use_ok 'Termbox::Go::Legacy', qw( :api :color :return :types );
 

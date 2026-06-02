@@ -11,19 +11,20 @@ $SIG{__WARN__} = sub {
 use Test::More;
 use Test::Exception;
 use Devel::StrictMode;
-use POSIX qw( dup2 getpid );
+use POSIX qw( dup2 getpid :fcntl_h );
 
 if ($^O eq 'MSWin32') {
   plan skip_all => 'Test irrelevant for Windows OS';
 } else {
-  my $has_tty = !$ENV{AUTOMATED_TESTING} && -w '/dev/tty';
-  if (!$has_tty) {
-    plan skip_all => 'Test requires a TTY device (not available)';
+  # POSIX: Check for a real terminal
+  my $tty;
+  unless (sysopen($tty, "/dev/tty", O_RDWR)) {
+    plan skip_all => 'Test requires /dev/tty (not available)';
+  }
+  unless (-t $tty) {
+    plan skip_all => 'Test requires a real TTY (not a pipe, FIFO, or stub)';
   }
 }
-
-dup2(fileno(STDERR), fileno(STDOUT));
-$| = 1;
 
 use_ok 'Termbox::Go::Legacy', qw( :api :return :types );
 

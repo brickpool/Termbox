@@ -1,5 +1,12 @@
 Revision history for Termbox::Go
 
+0.003010
+        2026-06-02
+        - Tests: remove incorrect skip logic; terminal tests now run reliably on real TTY
+        - Terminal: fix SIGIO crash during shutdown (kernel emitted async I/O signal on fd close)
+        - Terminal: set $SIG{IO} = 'IGNORE' in Close() to align with termbox-go shutdown semantics
+        - Tests: restore stable done_testing; full suite now executes to completion
+
 0.003009
         2026-05-16
         - fix get_term_size re-adjusted (see also GH #7)
