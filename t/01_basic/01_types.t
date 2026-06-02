@@ -59,7 +59,7 @@ subtest 'string and class templates' => sub {
 };
 
 subtest 'reference and instance templates' => sub {
-  plan tests => 12;
+  plan tests => 14;
 
   my $x = 42;
   is(_check(Termbox::_REF0(), { v => \$x }), 1, '_REF0 accepts scalar ref');
@@ -87,6 +87,10 @@ subtest 'reference and instance templates' => sub {
     '_INSTANCE accepts blessed object');
   is(_check(Termbox::_INSTANCE(), { v => [] }), 0,
     '_INSTANCE rejects unblessed ref');
+
+  my $fn = sub {};
+  is(_check(Termbox::_CODE(), { v => $fn }), 1, '_CODE accepts code ref');
+  is(_check(Termbox::_CODE(), { v => [] }), 0, '_CODE rejects non-code ref');
 };
 
 done_testing;

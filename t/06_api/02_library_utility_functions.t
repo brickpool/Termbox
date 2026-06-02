@@ -9,6 +9,10 @@ BEGIN {
   use_ok 'Termbox', qw( :return );
 }
 
+# -------------------------------
+note 'Library utility functions';
+# -------------------------------
+
 subtest 'version and feature utilities' => sub {
   plan tests => 5;
 
@@ -56,33 +60,6 @@ subtest 'error utilities' => sub {
   ok(
     defined($msg) && length($msg) >= 0,
     'tb_strerror(unknown) returns a fallback string'
-  );
-};
-
-subtest 'tb_cell_buffer deprecation + return shape' => sub {
-  plan tests => 4;
-
-  my @warnings;
-  local $SIG{__WARN__} = sub { push @warnings, @_ };
-
-  my $first = Termbox::tb_cell_buffer();
-  my $second = Termbox::tb_cell_buffer();
-
-  is(
-    ref($first), 
-    'ARRAY',
-    'tb_cell_buffer returns an array-ref'
-  );
-  is(
-    ref($second),
-    'ARRAY',
-    'tb_cell_buffer keeps returning an array-ref'
-  );
-  is(scalar(@warnings), 1, 'tb_cell_buffer warns exactly once');
-  like(
-    $warnings[0],
-    qr/deprecated/i,
-    'tb_cell_buffer warning mentions deprecation'
   );
 };
 

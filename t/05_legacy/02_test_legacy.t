@@ -1,59 +1,88 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
 use Test::More;
-use Test::Exception;
-use POSIX qw( dup2 );
 
-if ($^O eq 'MSWin32') {
-  my $fd = fileno(\*STDERR);
-  my $has_console = !$ENV{AUTOMATED_TESTING} && defined $fd && $fd >= 0;
-  if (!$has_console) {
-    plan skip_all => 'Test requires a valid console (not available)';
-  }
-} else {
-  my $has_tty = !$ENV{AUTOMATED_TESTING} && -w '/dev/tty';
-  if (!$has_tty) {
-    plan skip_all => 'Test requires a TTY device (not available)';
-  }
+BEGIN {
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox', qw(
+    :func
+    tb_set_func
+    tb_cell_buffer
+    TB_OK
+    TB_ERR
+  );
 }
 
-# Alchemical symbol "Fire"
-# https://en.wikipedia.org/wiki/List_of_Unicode_characters#Alchemical_symbols
-# https://en.wikipedia.org/wiki/Fire_(classical_element)
-my $ch = "\x{1f702}";
-dup2(fileno(STDERR), fileno(STDOUT));
-$| = 1;
+subtest 'tb_set_func sets extract callbacks' => sub {
+  local $SIG{__WARN__} = sub { warn @_ if $_[0] !~ /deprecated/i };
+  plan tests => 6;
 
-use_ok 'Termbox::Go::Legacy', qw( TB_VERSION_STR :api :types );
+  my $pre  = sub { return 1 };
+  my $post = sub { return 2 };
 
-lives_ok  { length(TB_VERSION_STR())      >= 0 or die } 'TB_VERSION_STR()';
+  # TB_FUNC_EXTRACT_PRE
+  is(
+    tb_set_func(TB_FUNC_EXTRACT_PRE(), $pre),
+    TB_OK(),
+    'tb_set_func(TB_FUNC_EXTRACT_PRE) returns TB_OK'
+  );
+  is(
+    $Termbox::global->{fn_extract_esc_pre},
+    $pre,
+    'pre extract function stored'
+  );
 
-lives_ok  { tb_init()                     == 0 or die } 'tb_init()';
-throws_ok { tb_set_cursor()               == 0 or die } qr/argument/i, 'croak';
-lives_ok  { (tb_width() // -1)            >= 0 or die } 'tb_width()';
-lives_ok  { (tb_height() // -1)           >= 0 or die } 'tb_height()';
-lives_ok  { tb_print(0,0,0,0,'ok')        == 0 or die } 'tb_print()';
-lives_ok  { tb_hide_cursor()              == 0 or die } 'tb_hide_cursor()';
-lives_ok  { tb_set_cursor(0,0)            == 0 or die } 'tb_set_cursor()';
-lives_ok  { tb_set_cell(0,0,ord('@'),0,0) == 0 or die } 'tb_set_cell()';
-lives_ok  { tb_set_input_mode(0)          >= 0 or die } 'tb_set_input_mode()';
-lives_ok  { tb_set_output_mode(0)         >= 0 or die } 'tb_set_output_mode()';
-lives_ok  { tb_peek_event(tb_event(),200);  die if $@ } 'tb_peek_event()';
-lives_ok  { tb_printf(0,0,0,0,'%d',0)     == 0 or die } 'tb_printf()';
-lives_ok  { @{ tb_cell_buffer() }          > 0 or die } 'tb_cell_buffer()';
-lives_ok  { tb_clear()                    == 0 or die } 'tb_clear()';
-lives_ok  { tb_invalidate()               == 0 or die } 'tb_invalidate()';
-lives_ok  { tb_present()                  == 0 or die } 'tb_present()';
-lives_ok  { tb_shutdown()                 == 0 or die } 'tb_shutdown()';
+  # TB_FUNC_EXTRACT_POST
+  is(
+    tb_set_func(TB_FUNC_EXTRACT_POST(), $post),
+    TB_OK(),
+    'tb_set_func(TB_FUNC_EXTRACT_POST) returns TB_OK'
+  );
+  is(
+    $Termbox::global->{fn_extract_esc_post},
+    $post,
+    'post extract function stored'
+  );
 
-lives_ok  { tb_utf8_char_length($ch)      == 4 or die } 'tb_utf8_char_length()';
-lives_ok  { tb_utf8_char_to_unicode(\$_, $ch) > 0 or die }
-  'tb_utf8_char_to_unicode()';
-lives_ok  { tb_utf8_unicode_to_char(\$_, ord($ch)) > 0 or die }
-  'tb_utf8_unicode_to_char()';
-lives_ok  { tb_last_errno()                > 0 or die } 'tb_last_errno()';
-lives_ok  { length(tb_strerror(0))        >= 0 or die } 'tb_strerror()';
-lives_ok  { length(tb_version())          >= 0 or die } 'tb_version()';
+  # invalid fn_type
+  is(
+    tb_set_func(-1, sub { }),
+    TB_ERR(),
+    'invalid fn_type returns TB_ERR'
+  );
+  ok(
+    !defined $Termbox::global->{fn_extract_esc_invalid},
+    'no unexpected global side effects'
+  );
+};
+
+subtest 'tb_cell_buffer deprecation + return shape' => sub {
+  plan tests => 4;
+
+  my @warnings;
+  local $SIG{__WARN__} = sub { push @warnings, @_ };
+
+  my $first = tb_cell_buffer();
+  my $second = tb_cell_buffer();
+
+  is(
+    ref($first), 
+    'ARRAY',
+    'tb_cell_buffer returns an array-ref'
+  );
+  is(
+    ref($second),
+    'ARRAY',
+    'tb_cell_buffer keeps returning an array-ref'
+  );
+  is(scalar(@warnings), 1, 'tb_cell_buffer warns exactly once');
+  like(
+    $warnings[0],
+    qr/deprecated/i,
+    'tb_cell_buffer warning mentions deprecation'
+  );
+};
 
 done_testing;

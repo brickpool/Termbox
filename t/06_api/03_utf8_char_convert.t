@@ -19,6 +19,7 @@ BEGIN {
 # -------------------------
 note 'tb_utf8_char_length';
 # -------------------------
+
 subtest 'tb_utf8_char_length - edge bytes' => sub {
   plan tests => 6;
 
@@ -37,6 +38,7 @@ subtest 'tb_utf8_char_length - edge bytes' => sub {
 # -----------------------------
 note 'tb_utf8_char_to_unicode';
 # -----------------------------
+
 subtest 'tb_utf8_unicode_to_char - ASCII and Unicode widths' => sub {
   plan tests => 10;
   my ($out, $len, $ch);
@@ -101,6 +103,7 @@ subtest 'tb_utf8_char_to_unicode - truncation returns negative' => sub {
 # -----------------------------
 note 'tb_utf8_unicode_to_char';
 # -----------------------------
+
 subtest 'tb_utf8_unicode_to_char - ASCII and Unicode' => sub {
   plan tests => 8;
   my ($out, $len, $ch);

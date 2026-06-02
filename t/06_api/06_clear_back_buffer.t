@@ -6,7 +6,7 @@ use Test::More;
 
 BEGIN {
   require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :return :color );
+  use_ok 'Termbox', qw( :api :return :color );
 }
 
 sub valid_preinit_status {
@@ -18,13 +18,17 @@ sub valid_preinit_status {
   return 0;
 }
 
+# -------------------------------
+note 'Back buffer clearing APIs';
+# -------------------------------
+
 subtest 'pre-init status checks' => sub {
   plan tests => 2;
 
-  my $rv = Termbox::tb_clear();
+  my $rv = tb_clear();
   ok(valid_preinit_status($rv), 'tb_clear returns expected pre-init status');
 
-  $rv = Termbox::tb_set_clear_attrs(TB_RED(), TB_BLUE());
+  $rv = tb_set_clear_attrs(TB_RED(), TB_BLUE());
   ok(
     valid_preinit_status($rv),
     'tb_set_clear_attrs returns expected pre-init status'
@@ -38,11 +42,11 @@ subtest 'clear and set_clear_attrs after init' => sub {
 
   plan tests => 2;
 
-  my $rv = Termbox::tb_set_clear_attrs(TB_RED(), TB_BLUE());
+  my $rv = tb_set_clear_attrs(TB_RED(), TB_BLUE());
   is($rv, TB_OK(), 'tb_set_clear_attrs returns TB_OK after init');
 
-  $rv = Termbox::tb_clear();
+  $rv = tb_clear();
   is($rv, TB_OK(), 'tb_clear returns TB_OK after init');
 };
 
-done_testing();
+done_testing;

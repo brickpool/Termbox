@@ -6,8 +6,12 @@ use Test::More;
 
 BEGIN {
   require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :return :color );
+  use_ok 'Termbox', qw( :api );
 }
+
+# ------------------------------------
+note 'Get terminal (buffer) size API';
+# ------------------------------------
 
 subtest 'size functions pre-init status checks' => sub {
   $Termbox::global->{initialized} = 1;
@@ -16,11 +20,11 @@ subtest 'size functions pre-init status checks' => sub {
 
   plan tests => 2;
 
-  my $rv = Termbox::tb_width();
+  my $rv = tb_width();
   ok($rv, 'tb_width returns expected pre-init status');
 
-  $rv = Termbox::tb_height();
+  $rv = tb_height();
   ok($rv, 'tb_height returns expected pre-init status');
 };
 
-done_testing();
+done_testing;

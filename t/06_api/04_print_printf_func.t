@@ -7,7 +7,7 @@ use Test::More;
 
 BEGIN {
   require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :return );
+  use_ok 'Termbox', qw( :api :return );
 }
 
 sub valid_preinit_status {
@@ -26,11 +26,11 @@ note 'Print and printf functions';
 subtest 'tb_print and tb_print_ex' => sub {
   plan tests => 6;
 
-  my $rv = Termbox::tb_print(0, 0, 0, 0, 'Hello');
+  my $rv = tb_print(0, 0, 0, 0, 'Hello');
   ok(valid_preinit_status($rv), 'tb_print returns a valid status');
 
   my $out_w = -1;
-  $rv = Termbox::tb_print_ex(0, 0, 0, 0, \$out_w, 'Hello');
+  $rv = tb_print_ex(0, 0, 0, 0, \$out_w, 'Hello');
   ok(valid_preinit_status($rv), 'tb_print_ex returns a valid status');
 
   if ($rv >= 0) {
@@ -39,13 +39,13 @@ subtest 'tb_print and tb_print_ex' => sub {
     pass('tb_print_ex out_w check skipped due non-success status');
   }
 
-  $rv = Termbox::tb_print_ex(0, 0, 0, 0, undef, "A\nB");
+  $rv = tb_print_ex(0, 0, 0, 0, undef, "A\nB");
   ok(valid_preinit_status($rv), 'tb_print_ex handles newline input');
 
-  $rv = Termbox::tb_print_ex(0, 0, 0, 0, undef, "");
+  $rv = tb_print_ex(0, 0, 0, 0, undef, "");
   ok(valid_preinit_status($rv), 'tb_print_ex handles empty string');
 
-  $rv = Termbox::tb_print_ex(-1, -1, 0, 0, undef, 'X');
+  $rv = tb_print_ex(-1, -1, 0, 0, undef, 'X');
   ok(valid_preinit_status($rv), 'tb_print_ex handles invalid position');
 };
 
@@ -61,14 +61,14 @@ subtest 'tb_print_ex combining char uses extend path' => sub {
   plan tests => 4;
 
   my $out_w = -1;
-  $rv = Termbox::tb_print_ex(0, 0, 0, 0, \$out_w, "A\x{0301}");
+  $rv = tb_print_ex(0, 0, 0, 0, \$out_w, "A\x{0301}");
   is($rv, TB_OK(), 'tb_print_ex accepts base plus combining char');
   is($out_w, 1, 'combining char does not increase out_w');
 
   my $cells;
   {
     local $SIG{__WARN__} = sub { };
-    $cells = Termbox::tb_cell_buffer();
+    $cells = tb_cell_buffer();
   }
   is($cells->[0]->{ch}, "A\x{0301}", 'cell keeps combined grapheme');
   {
@@ -80,11 +80,11 @@ subtest 'tb_print_ex combining char uses extend path' => sub {
 subtest 'tb_printf and tb_printf_ex' => sub {
   plan tests => 4;
 
-  my $rv = Termbox::tb_printf(0, 0, 0, 0, '%s-%d', 'N', 1);
+  my $rv = tb_printf(0, 0, 0, 0, '%s-%d', 'N', 1);
   ok(valid_preinit_status($rv), 'tb_printf returns a valid status');
 
   my $out_w = -1;
-  $rv = Termbox::tb_printf_ex(0, 0, 0, 0, \$out_w, '%s', 'Hello');
+  $rv = tb_printf_ex(0, 0, 0, 0, \$out_w, '%s', 'Hello');
   ok(valid_preinit_status($rv), 'tb_printf_ex returns a valid status');
 
   if ($rv >= 0) {
@@ -93,7 +93,7 @@ subtest 'tb_printf and tb_printf_ex' => sub {
     pass('tb_printf_ex out_w check skipped due non-success status');
   }
 
-  $rv = Termbox::tb_printf_ex(0, 0, 0, 0, \$out_w, '');
+  $rv = tb_printf_ex(0, 0, 0, 0, \$out_w, '');
   ok(valid_preinit_status($rv), 'tb_printf_ex handles empty format string');
 };
 

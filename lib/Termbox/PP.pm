@@ -274,8 +274,16 @@ our %EXPORT_TAGS = (
     TB_REVERSE
     TB_ITALIC
     TB_BLINK
-    TB_256_BLACK
-  )],
+    ), 
+    TB_OPT_ATTR_W == 32
+    ? qw( TB_256_BLACK )
+    : qw( TB_TRUECOLOR_BOLD
+          TB_TRUECOLOR_UNDERLINE
+          TB_TRUECOLOR_REVERSE
+          TB_TRUECOLOR_ITALIC
+          TB_TRUECOLOR_BLINK
+          TB_TRUECOLOR_BLACK )
+  ],
 
   event => [qw(
     TB_EVENT_KEY
@@ -297,7 +305,10 @@ our %EXPORT_TAGS = (
     TB_OUTPUT_256
     TB_OUTPUT_216
     TB_OUTPUT_GRAYSCALE
-    ), TB_OPT_ATTR_W >= 32 ? qw( TB_OUTPUT_TRUECOLOR ) : ()
+    ), 
+    TB_OPT_ATTR_W >= 32 
+    ? qw( TB_OUTPUT_TRUECOLOR ) 
+    : ()
   ],
 
   return => [qw(
@@ -778,6 +789,8 @@ use constant {
   _SCALAR0    => { required => 1, defined => 1, default => \undef, 
                    strict_type => 1 },
   _ARRAY0     => { required => 1, defined => 1, default => [], 
+                   strict_type => 1 },
+  _CODE       => { required => 1, defined => 1, default => sub { }, 
                    strict_type => 1 },
   _INSTANCE   => { required => 1, allow => \&blessed },
 };
@@ -1511,6 +1524,28 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
 }
 
 #
+# Return a reference to the cell at the specified position.
+#
+
+sub tb_get_cell {    # $cell ($x, $y, $back, $cell)
+  my ($x, $y, $back, $cell) = @_;
+  if (STRICT) {
+    check {
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+      3 => _BOOL,
+      4 => _INSTANCE,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $back += 0;
+  }
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+  my $buffer = $back ? 'back' : 'front';
+  $global->{$buffer} = $cell->get($x, $y) // return TB_ERR_OUT_OF_BOUNDS;
+  return TB_OK;
+}
+
+#
 # Set the input and output mode
 #
 
@@ -1572,6 +1607,55 @@ sub tb_set_output_mode {    # $int ($mode)
     }
   }
   return TB_ERR;
+}
+
+#
+# Wait for an event
+#
+
+sub tb_peek_event {   # $int ($event, $timeout_ms)
+  my ($event, $timeout_ms) = @_;
+  if (STRICT) {
+    check {
+      1 => _INSTANCE,
+      2 => _INT,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $timeout_ms += 0;
+  }
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+  return wait_event($event, $timeout_ms);
+}
+
+sub tb_poll_event {   # $int ($event)
+  my ($event) = @_;
+  if (STRICT) {
+    check {
+      1 => _INSTANCE,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  }
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+  return wait_event($event, -1);
+}
+
+#
+# Internal termbox fds that can be used with 'poll', 'select'
+#
+
+sub tb_get_fds {      # $int (\$ttyfd, \$resizefd)
+  my ($ttyfd, $resizefd) = @_;
+  if (STRICT) {
+    check {
+      1 => _SCALAR0,
+      2 => _SCALAR0,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  }
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+
+  $$ttyfd    = $global->{rfd};
+  $$resizefd = $global->{resize_pipefd}[0];
+
+  return TB_OK;
 }
 
 #
@@ -1666,6 +1750,75 @@ sub tb_printf {    # $int ($x, $y, $fg, $bg, $fmt, @args)
 sub tb_printf_ex {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
   goto &tb_printf_inner;
 }
+
+#
+# Send raw bytes to terminal.
+#
+
+sub tb_send {    # $int ($buf, $nbuf)
+  my ($buf, $nbuf) = @_;
+  if (STRICT) {
+    check {
+      1 => _STRING,
+      2 => _NONNEGINT,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $buf .= '';
+    $nbuf += 0;
+  }
+  return bytebuf_nputs(\$global->{outbuf}, $buf, $nbuf);
+}
+
+sub tb_sendf {   # $int ($fmt, @args)
+  my ($fmt, @args) = @_;
+  if (STRICT) {
+    check {
+      1 => _STRING0,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $fmt .= '';
+  }
+  my $buf = @args ? sprintf($fmt, @args) : $fmt;
+  my $len = bytes::length($buf);
+  return TB_ERR if $len >= TB_OPT_PRINTF_BUF;
+  return tb_send($buf, $len);
+}
+
+#
+# Deprecated
+#
+
+sub tb_set_func {
+  my ($fn_type, $fn) = @_;
+  if (STRICT) {
+    check {
+      1 => _NONNEGINT,
+      2 => _CODE,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $fn_type += 0;
+    ref $fn or return TB_ERR;
+  }
+  state $warned = 0;
+  unless ($warned) {
+    warn "tb_set_func() is deprecated and may be removed in a future release\n";
+    $warned = 1;
+  }
+
+  switch: for ($fn_type) {
+    case: TB_FUNC_EXTRACT_PRE == $_ and do {
+      $global->{fn_extract_esc_pre} = $fn;
+      return TB_OK;
+    };
+    case: TB_FUNC_EXTRACT_POST == $_ and do {
+      $global->{fn_extract_esc_post} = $fn;
+      return TB_OK;
+    };
+  }
+
+  return TB_ERR;
+}
+
 
 #
 # UTF-8 utility functions
