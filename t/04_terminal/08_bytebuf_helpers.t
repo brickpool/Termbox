@@ -17,7 +17,7 @@ subtest 'bytebuf_puts and bytebuf_nputs wrappers' => sub {
   plan tests => 7;
   my $buf = '';
 
-  is(Termbox::bytebuf_puts(\$buf, undef), TB_OK(), 'puts undef is ok');
+  is(Termbox::bytebuf_puts(\$buf, undef), TB_ERR(), 'puts undef is not ok');
 
   is(Termbox::bytebuf_puts(\$buf, ''), TB_OK(), 'puts empty is ok');
   is($buf, '', 'empty unchanged');

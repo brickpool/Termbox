@@ -5,7 +5,8 @@ use warnings;
 use Test::More;
 
 BEGIN {
-  use_ok 'Termbox::PP';
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox';
 }
 
 done_testing;

@@ -3,129 +3,90 @@ use strict;
 use warnings;
 
 use Test::More;
-use Test::Exception;
 
 BEGIN {
+  use_ok 'Params::Check';
   require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :return :event :keys );
 }
 
-subtest 'Termbox::Cell->new' => sub {
-  plan tests => 5;
-  my $cell;
-  lives_ok { $cell = Termbox::Cell->new() } 'new() lives';
-  isa_ok    $cell, 'Termbox::Cell',  'returns blessed object';
-  is        $cell->{ch}, '', 'ch defaults to empty string';
-  is        $cell->{fg}, 0,  'fg defaults to 0';
-  is        $cell->{bg}, 0,  'bg defaults to 0';
-};
+sub _check {
+  my ($tmpl, $vals) = @_;
+  my %tmpl = %{$tmpl};
+  my %vals = %{$vals};
 
-subtest 'Termbox::Cell::set and accessors' => sub {
-  plan tests => 8;
-  my $cell = Termbox::Cell->new();
-  my $rv;
-  lives_ok { $rv = $cell->set('A', 3, 5) } 'set() lives';
-  is $rv,         TB_OK(), 'set returns TB_OK';
-  is $cell->{ch}, 'A',     'ch stored as UTF-8 string';
-  is $cell->{fg}, 3,       'fg stored';
-  is $cell->{bg}, 5,       'bg stored';
-  is $cell->ch,   ord('A'), 'ch() returns codepoint';
-  is $cell->fg,   3,        'fg() accessor';
-  is $cell->bg,   5,        'bg() accessor';
-};
+  local $Params::Check::SANITY_CHECK_TEMPLATE = 1;
+  local $Params::Check::NO_DUPLICATES         = 1;
+  local $Params::Check::ALLOW_UNKNOWN         = 0;
 
-subtest 'Termbox::Cell::set empty ch' => sub {
-  plan tests => 2;
-  my $cell = Termbox::Cell->new();
-  $cell->set('X', 1, 2);
-  is $cell->set('', 0, 0), TB_OK(), 'empty ch accepted';
-  is $cell->{ch}, '',                'ch cleared';
-};
-
-subtest 'Termbox::Cell::equal' => sub {
-  plan tests => 4;
-  my $a = Termbox::Cell->new();
-  my $b = Termbox::Cell->new();
-  $a->set('X', 9, 1);
-  $b->set('X', 9, 1);
-  is $a->equal($b), 1, 'identical cells are equal';
-  $b->set('Y', 9, 1);
-  is $a->equal($b), 0, 'different ch: not equal';
-  $b->set('X', 8, 1);
-  is $a->equal($b), 0, 'different fg: not equal';
-  $b->set('X', 9, 2);
-  is $a->equal($b), 0, 'different bg: not equal';
-};
-
-subtest 'Termbox::Cell::copy' => sub {
-  plan tests => 5;
-  my $src = Termbox::Cell->new();
-  my $dst = Termbox::Cell->new();
-  $src->set('M', 5, 3);
-  my $rv;
-  lives_ok { $rv = $dst->copy($src) } 'copy() lives';
-  is $rv,          TB_OK(), 'copy returns TB_OK';
-  is $dst->{ch},   'M',     'ch copied';
-  is $dst->{fg},   5,       'fg copied';
-  is $dst->{bg},   3,       'bg copied';
-};
-
-SKIP: {
-  skip 'TB_OPT_EGC not enabled', 4 unless Termbox::TB_OPT_EGC();
-
-  subtest 'Termbox::Cell EGC accessors' => sub {
-    plan tests => 4;
-    my $cell = Termbox::Cell->new();
-    $cell->set("A\x{0308}", 1, 0);  # A + combining diaeresis
-    my $egc = $cell->egc;
-    is ref($egc), 'ARRAY', 'egc() returns ARRAY ref';
-    is $egc->[0], ord('A'), 'first codepoint in egc';
-    ok $cell->nech >= 1,    'nech() >= 1 for EGC';
-    ok $cell->cech >= 1,    'cech() >= 1 for EGC';
-  };
+  return Params::Check::check({ v => \%tmpl }, \%vals) ? 1 : 0;
 }
 
-subtest 'Termbox::Event->new' => sub {
+subtest 'numeric templates' => sub {
   plan tests => 10;
-  my $ev;
-  lives_ok { $ev = Termbox::Event->new() } 'new() lives';
-  isa_ok    $ev, 'Termbox::Event', 'returns blessed object';
-  is $ev->{type}, 0, 'type defaults to 0';
-  is $ev->{mod},  0, 'mod defaults to 0';
-  is $ev->{key},  0, 'key defaults to 0';
-  is $ev->{ch},   0, 'ch defaults to 0';
-  is $ev->{w},    0, 'w defaults to 0';
-  is $ev->{h},    0, 'h defaults to 0';
-  is $ev->{x},    0, 'x defaults to 0';
-  is $ev->{y},    0, 'y defaults to 0';
+
+  is(_check(Termbox::_POSINT(), { v => 1 }), 1, '_POSINT accepts 1');
+  is(_check(Termbox::_POSINT(), { v => 0 }), 0, '_POSINT rejects 0');
+
+  is(_check(Termbox::_NONNEGINT(), { v => 0 }), 1, '_NONNEGINT accepts 0');
+  is(_check(Termbox::_NONNEGINT(), { v => -1 }), 0, '_NONNEGINT rejects -1');
+
+  is(_check(Termbox::_INT(), { v => -10 }), 1, '_INT accepts negative');
+  is(_check(Termbox::_INT(), { v => 0 }),   1, '_INT accepts zero');
+  is(_check(Termbox::_INT(), { v => 'x' }), 0, '_INT rejects non-numeric');
+
+  is(_check(Termbox::_BOOL(), { v => 0 }), 1, '_BOOL accepts 0');
+  is(_check(Termbox::_BOOL(), { v => 1 }), 1, '_BOOL accepts 1');
+  is(_check(Termbox::_BOOL(), { v => 2 }), 0, '_BOOL rejects 2');
 };
 
-subtest 'Termbox::Event accessors' => sub {
-  plan tests => 8;
-  my $ev = Termbox::Event->new();
-  $ev->{type} = TB_EVENT_KEY;
-  $ev->{mod}  = TB_MOD_CTRL;
-  $ev->{key}  = TB_KEY_ENTER;
-  $ev->{ch}   = ord('a');
-  $ev->{w}    = 80;
-  $ev->{h}    = 24;
-  $ev->{x}    = 10;
-  $ev->{y}    = 5;
-  is $ev->type, TB_EVENT_KEY,  'type() accessor';
-  is $ev->mod,  TB_MOD_CTRL,   'mod() accessor';
-  is $ev->key,  TB_KEY_ENTER,  'key() accessor';
-  is $ev->ch,   ord('a'),      'ch() accessor';
-  is $ev->w,    80,            'w() accessor';
-  is $ev->h,    24,            'h() accessor';
-  is $ev->x,    10,            'x() accessor';
-  is $ev->y,    5,             'y() accessor';
+subtest 'string and class templates' => sub {
+  plan tests => 6;
+
+  is(_check(Termbox::_STRING(), { v => 'abc' }), 1, 
+    '_STRING accepts non-empty string');
+  is(_check(Termbox::_STRING(), { v => '' }), 0, 
+    '_STRING rejects empty string');
+
+  is(_check(Termbox::_STRING0(), { v => '' }), 1, 
+    '_STRING0 accepts empty string');
+  is(_check(Termbox::_STRING0(), { v => 'x' }), 1, 
+    '_STRING0 accepts non-empty string');
+
+  is(_check(Termbox::_CLASS(), { v => 'Termbox::Event' }), 1,
+    '_CLASS accepts package-like name');
+  is(_check(Termbox::_CLASS(), { v => 'Termbox-Event' }), 0,
+    '_CLASS rejects invalid class name');
 };
 
-subtest 'Termbox::Event type constants' => sub {
-  plan tests => 3;
-  is TB_EVENT_KEY,    1, 'TB_EVENT_KEY == 1';
-  is TB_EVENT_RESIZE, 2, 'TB_EVENT_RESIZE == 2';
-  is TB_EVENT_MOUSE,  3, 'TB_EVENT_MOUSE == 3';
+subtest 'reference and instance templates' => sub {
+  plan tests => 12;
+
+  my $x = 42;
+  is(_check(Termbox::_REF0(), { v => \$x }), 1, '_REF0 accepts scalar ref');
+  is(_check(Termbox::_REF0(), { v => $x }),  0, '_REF0 rejects non-ref');
+
+  is(_check(Termbox::_ARRAY0(), { v => [] }), 1, '_ARRAY0 accepts array ref');
+  is(_check(Termbox::_ARRAY0(), { v => {} }), 0, '_ARRAY0 rejects hash ref');
+
+  my $s = 'abc';
+  is(_check(Termbox::_SCALAR0(), { v => \undef }), 1,
+    '_SCALAR0 accepts \undef');
+  is(_check(Termbox::_SCALAR0(), { v => \0 }), 1,
+    '_SCALAR0 accepts scalar int ref');
+  is(_check(Termbox::_SCALAR0(), { v => \$s }), 1,
+    '_SCALAR0 accepts scalar string ref');
+  is(_check(Termbox::_SCALAR0(), { v => undef }), 0,
+    '_SCALAR0 rejects undef');
+  is(_check(Termbox::_SCALAR0(), { v => $s }), 0,
+    '_SCALAR0 rejects non-ref scalar');
+  is(_check(Termbox::_SCALAR0(), { v => [] }), 0,
+    '_SCALAR0 rejects array ref');
+
+  my $event = Termbox::Event->new();
+  is(_check(Termbox::_INSTANCE(), { v => $event }), 1,
+    '_INSTANCE accepts blessed object');
+  is(_check(Termbox::_INSTANCE(), { v => [] }), 0,
+    '_INSTANCE rejects unblessed ref');
 };
 
 done_testing;

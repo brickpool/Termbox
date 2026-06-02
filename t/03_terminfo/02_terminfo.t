@@ -9,8 +9,10 @@ BEGIN {
   use_ok 'Termbox', qw( :return );
 }
 
-use constant INT16_SIZE => Termbox::INT16_SIZE();
-use constant OUT_OF_BOUNDS => 512;
+use constant {
+  INT16_SIZE    => Termbox::INT16_SIZE(),
+  OUT_OF_BOUNDS => 512,
+};
 
 subtest 'Terminfo get_terminfo_* with mocked data' => sub {
   # suppress warnings when testing with mocked data

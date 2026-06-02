@@ -4,6 +4,8 @@ use warnings;
 
 use Test::More;
 
-use_ok 'Termbox::PP::Terminfo::Builtin';
+BEGIN {
+  use_ok 'Termbox::PP::Terminfo::Builtin';
+}
 
 done_testing;

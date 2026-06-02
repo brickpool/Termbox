@@ -8,7 +8,7 @@
 #                 2015-2026 Adam Saponara <as@php.net>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024-2026 J. Schneider
+#   Author: 2024,2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox;
@@ -36,6 +36,7 @@ our $AUTHORITY = 'github:brickpool';
 
 require bytes;
 use Config;
+use IO::File ();
 use POSIX qw(
   :errno_h
   :termios_h
@@ -60,7 +61,7 @@ BEGIN { sub TB_VERSION_STR () { state $qv = $version->normal } }
 
 # Deprecated. Back-compat for old flag.
 use constant TB_OPT_TRUECOLOR => exists $ENV{TB_OPT_TRUECOLOR} 
-  ? $ENV{TB_OPT_TRUECOLOR} 
+  ? !!$ENV{TB_OPT_TRUECOLOR} 
   : undef;
 
 # Ensure sane 'TB_OPT_ATTR_W' (16, 32, or 64)
@@ -359,23 +360,32 @@ our %EXPORT_TAGS = (
 
 use constant INT16_SIZE => $Config{shortsize};
 
-use constant TB_OPT_EGC => exists $ENV{TB_OPT_EGC} ? $ENV{TB_OPT_EGC} : 1;
+use constant TB_OPT_EGC => exists $ENV{TB_OPT_EGC} ? !!$ENV{TB_OPT_EGC} : 1;
 
 # Define this to set the string length used in 'tb_printf' and 'tb_sendf'.
 use constant TB_OPT_PRINTF_BUF => exists $ENV{TB_OPT_PRINTF_BUF} 
-  ? $ENV{TB_OPT_PRINTF_BUF} 
+  ? 0+$ENV{TB_OPT_PRINTF_BUF} 
   : 4096;
+
+# Define this to set the size of the buffer used when reading from the tty.
+use constant TB_OPT_READ_BUF => exists $ENV{TB_OPT_READ_BUF} 
+  ? 0+$ENV{TB_OPT_READ_BUF} 
+  : 64;
 
 # In this port, TB_OPT_LIBC_WCHAR selects the Unicode::UCD-based wcwidth backend
 use constant TB_OPT_LIBC_WCHAR => exists $ENV{TB_OPT_LIBC_WCHAR} 
-  ? $ENV{TB_OPT_LIBC_WCHAR} 
+  ? !!$ENV{TB_OPT_LIBC_WCHAR}
   : 1;
 
 use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? $ENV{PATH_MAX} : 4096;
 
 use constant TB_TERMINFO_DIR => exists $ENV{TB_TERMINFO_DIR} 
-  ? $ENV{TB_TERMINFO_DIR} 
+  ? ''.$ENV{TB_TERMINFO_DIR}
   : undef;
+
+use constant TB_RESIZE_FALLBACK_MS => exists $ENV{TB_RESIZE_FALLBACK_MS} 
+  ? 0+$ENV{TB_RESIZE_FALLBACK_MS}
+  : 1000;
 
 # ASCII key constants ($tb_event->key)
 use constant {
@@ -631,16 +641,24 @@ use constant TB_ERR_RESIZE_SELECT => TB_ERR_RESIZE_POLL;
 
 # Deprecated. Function types to be used with 'tb_set_func'.
 use constant {
-  TB_FUNC_EXTRACT_PRE      => 0,
-  TB_FUNC_EXTRACT_POST     => 1,
+  TB_FUNC_EXTRACT_PRE  => 0,
+  TB_FUNC_EXTRACT_POST => 1,
+};
+
+# Mouse escape parser type tags (enum equivalent)
+use constant {
+  TYPE_VT200 => 0,
+  TYPE_1006  => 1,
+  TYPE_1015  => 2,
+  TYPE_MAX   => 3,
 };
 
 # ------------------------------------------------------------------------
-# Variables --------------------------------------------------------------
+# Globals ----------------------------------------------------------------
 # ------------------------------------------------------------------------
 
 # Holds the current state of the terminal
-our $global = {};
+use vars qw( $global );
 
 # ------------------------------------------------------------------------
 # Utility functions ------------------------------------------------------
@@ -742,6 +760,28 @@ my $clone = sub {    # $clone ()
   return $dst;
 };
 
+# ------------------------------------------------------------------------
+# Params Check -----------------------------------------------------------
+# ------------------------------------------------------------------------
+
+use constant {
+  _ANY        => { required => 1, defined => 0 },
+  _STRING     => { required => 1, defined => 1, allow => qr/.+/ },
+  _STRING0    => { required => 1, defined => 1, default => '', 
+                   strict_type => 1 },
+  _CLASS      => { required => 1, defined => 1, allow => qr/\A\w+(::\w+)*\z/ },
+  _POSINT     => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
+  _NONNEGINT  => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+  _INT        => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+  _BOOL       => { required => 1, default => 0, allow => qr/\A[01]?\z/ },
+  _REF0       => { required => 1, allow => \&CORE::ref },
+  _SCALAR0    => { required => 1, defined => 1, default => \undef, 
+                   strict_type => 1 },
+  _ARRAY0     => { required => 1, defined => 1, default => [], 
+                   strict_type => 1 },
+  _INSTANCE   => { required => 1, allow => \&blessed },
+};
+
 BEGIN { if (STRICT) {
   no warnings 'once';
   require Params::Check;
@@ -767,7 +807,7 @@ sub Termbox::Cell::new {    # $cell ()
   my ($class) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\w+(::\w+)*$/ },
+      1 => _CLASS,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return bless { 
@@ -791,16 +831,16 @@ sub Termbox::Cell::set {    # $int ($ch, $fg, $bg)
   my ($cell, $ch, $fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, default => "\0", strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INSTANCE,
+      2 => _STRING0,
+      3 => _NONNEGINT,
+      4 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   } else {
-    $ch //= "\0";
     $fg += 0;
     $bg += 0;
   }
+  $ch = "\0" unless length($ch);
   $cell->{ch} = TB_OPT_EGC ? $ch : substr($ch, 0, 1);
   $cell->{fg} = $fg;
   $cell->{bg} = $bg;
@@ -811,8 +851,8 @@ sub Termbox::Cell::equal {    # $bool ($other)
   my ($a, $b) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
+      2 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
   return 0
@@ -827,8 +867,8 @@ sub Termbox::Cell::copy {    # $int ($src)
   my ($dst, $src) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
+      2 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   %$dst = %$src;
@@ -843,7 +883,7 @@ sub Termbox::Event::new {    # $event ()
   my ($class) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\w+(::\w+)*$/ },
+      1 => _CLASS,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return bless {
@@ -876,7 +916,7 @@ sub cellbuf::new {    # $cellbuf ()
   my ($class) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\w+(::\w+)*$/ },
+      1 => _CLASS,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return bless {
@@ -890,9 +930,9 @@ sub cellbuf::init {    # $int ($width, $height)
   my ($c, $w, $h) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
+      1 => _INSTANCE,
+      2 => _POSINT,
+      3 => _POSINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $c->{width}  = $w;
@@ -905,7 +945,7 @@ sub cellbuf::clear {    # $int ()
   my ($c) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my $rv;
@@ -919,9 +959,9 @@ sub cellbuf::get {    # $int ($x, $y)
   my ($c, $x, $y) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INSTANCE,
+      2 => _NONNEGINT,
+      3 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return undef unless $c->in_bounds($x, $y);
@@ -932,9 +972,9 @@ sub cellbuf::in_bounds {    # $bool ($x, $y)
   my ($c, $x, $y) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INSTANCE,
+      2 => _NONNEGINT,
+      3 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
   if ($x < 0 || $x >= $c->{width} || $y < 0 || $y >= $c->{height}) {
@@ -947,9 +987,9 @@ sub cellbuf::resize {     # $int ($width, $height)
   my ($c, $w, $h) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
+      1 => _INSTANCE,
+      2 => _POSINT,
+      3 => _POSINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my $rv;
@@ -989,74 +1029,19 @@ sub cellbuf::resize {     # $int ($width, $height)
 }
 
 #
-# capnode and captrie classes for terminal capability matching
+# captrie class for terminal capability matching
 #
-
-sub capnode::new {    # $capnode (%args)
-  my ($class, %args) = @_;
-  if (STRICT) {
-    my $args = check {
-      class     => { required => 1, defined => 1, allow => qr/^\w+(::\w+)*$/ },
-      is_leaf   => { default => 0,  strict_type => 1 },
-      key       => { default => 0,  strict_type => 1 },
-      mod       => { default => 0,  strict_type => 1 },
-      nchildren => { default => 0,  strict_type => 1 },
-      cap       => { default => '', strict_type => 1 },
-    } => { 'class', @_ } or return undef;
-    $class = delete $args->{class};
-    %args = %$args;
-  }
-  return bless {
-    is_leaf   => $args{is_leaf}   // 0,
-    key       => $args{key}       // 0,
-    mod       => $args{mod}       // 0,
-    nchildren => $args{nchildren} // 0,
-    cap       => $args{cap}       // '',
-  }, $class;
-}
-
-sub capnode::is_leaf   { $_[0]->{is_leaf} }
-sub capnode::key       { $_[0]->{key} }
-sub capnode::mod       { $_[0]->{mod} }
-sub capnode::nchildren { $_[0]->{nchildren} }
-sub capnode::cap       { $_[0]->{cap} }
-
-sub capnode::set_nchildren {    # $int ($nchildren)
-  my ($self, $n) = @_;
-  if (STRICT) {
-    check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
-  $self->{nchildren} = 0+ $n;
-  return TB_OK;
-}
-
-sub capnode::set_cap {    # $int ($cap|undef)
-  my ($self, $cap) = @_;
-  if (STRICT) {
-    check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, default => '', strict_type => 1 },
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
-  $self->{cap} = $cap // '';
-  return TB_OK;
-}
 
 sub captrie::new {    # $captrie ()
   my ($class) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/^\w+(::\w+)*$/ },
+      1 => _CLASS,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return bless {
     exact      => {},
     prefixes   => {},
-    has_child  => {},
-    ordered    => [],
     alt        => undef,
   }, $class;
 }
@@ -1065,13 +1050,11 @@ sub captrie::clear {    # $int ()
   my ($self) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $self->{exact}     = {};
   $self->{prefixes}  = {};
-  $self->{has_child} = {};
-  $self->{ordered}   = [];
   $self->{alt}       = undef;
   return TB_OK;
 }
@@ -1080,36 +1063,35 @@ sub captrie::rebuild_alt {    # $int ()
   my ($self) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my @ordered = sort {
        length($b) <=> length($a)
     || $a cmp $b
   } keys %{ $self->{exact} };
-  $self->{ordered} = \@ordered;
   $self->{alt} = @ordered ? join('|', map { quotemeta($_) } @ordered) : undef;
   return TB_OK;
 }
 
-sub captrie::has_prefix {    # $bool ($s|undef)
+sub captrie::has_prefix {    # $bool ($s)
   my ($self, $s) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, default => '', strict_type => 1 },
+      1 => _INSTANCE,
+      2 => _STRING,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
   return 0 unless length($s);
   return exists $self->{prefixes}{$s} ? 1 : 0;
 }
 
-sub captrie::best_match {    # $s|undef ($buf|undef)
+sub captrie::best_match {    # $s|undef ($buf)
   my ($self, $buf) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, default => '', strict_type => 1 },
+      1 => _INSTANCE,
+      2 => _STRING,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
   return undef unless length($buf);
@@ -1119,14 +1101,14 @@ sub captrie::best_match {    # $s|undef ($buf|undef)
   return undef;
 }
 
-sub captrie::add {    # $int ($cap|undef, $key, $mod)
+sub captrie::add {    # $int ($cap, $key, $mod)
   my ($self, $cap, $key, $mod) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, default => '', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INSTANCE,
+      2 => _STRING,
+      3 => _NONNEGINT,
+      4 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   # Nothing to do for empty caps
@@ -1143,12 +1125,6 @@ sub captrie::add {    # $int ($cap|undef, $key, $mod)
     $self->{prefixes}{$p} = 1;
   }
 
-  $self->{has_child}{$cap} = $self->has_prefix($cap) ? 1 : 0;
-  for my $i (1 .. length($cap) - 1) {
-    my $p = substr($cap, 0, $i);
-    $self->{has_child}{$p} = 1;
-  }
-
   return $self->rebuild_alt();
 }
 
@@ -1156,36 +1132,38 @@ sub captrie::find {    # $int ($buf, \$last, \$depth)
   my ($self, $buf, $last, $depth) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, allow => \&CORE::ref },
-      5 => { required => 1, allow => \&CORE::ref },
+      1 => _INSTANCE,
+      2 => _STRING0,
+      3 => _REF0,
+      4 => _REF0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $buf .= '';
   }
 
-  my $node = capnode->new(
+  my $node = {
     is_leaf   => 0,
     key       => 0,
     mod       => 0,
     nchildren => scalar(keys %{ $self->{exact} }) ? 1 : 0,
     cap       => '',
-  );
+  };
 
   if (defined(my $m = $self->best_match($buf))) {
     my $leaf = $self->{exact}{$m};
-    $node = capnode->new(
+    $node = {
       is_leaf   => 1,
       key       => $leaf->{key},
       mod       => $leaf->{mod},
-      nchildren => ($self->{has_child}{$m} ? 1 : 0),
+      # Keep C-shape node contract; derive child-ness from prefix table.
+      nchildren => ($self->has_prefix($m) ? 1 : 0),
       cap       => $m,
-    );
+    };
     $$depth = length($m);
   }
   elsif ($self->has_prefix($buf)) {
-    $node->set_nchildren(1);
-    $node->set_cap($buf);
+    $node->{nchildren} = 1;
+    $node->{cap} = $buf;
     $$depth = length($buf);
   }
   else {
@@ -1201,18 +1179,17 @@ sub captrie::find {    # $int ($buf, \$last, \$depth)
 # ------------------------------------------------------------------------
 
 #
-# The 'tb_global' class holds the global state of the terminal, including
+# The 'tb_global' struct holds the global state of the terminal, including
 # filehandles, terminal state, colors, modes, parser state, buffers,
 #
 
-$global = bless({
+$global = {
   # Filehandles
-  ttyfd       => undef,
-  rfd         => undef,
-  wfd         => undef,
+  ttyfd       => -1,
+  rfd         => -1,
+  wfd         => -1,
   ttyfd_open  => -1,
-
-  resize_pipe => [undef, undef],
+  resize_pipefd => [-1, -1],
 
   # Terminal state
   width       => -1,
@@ -1234,16 +1211,15 @@ $global = bless({
 
   # Terminfo
   terminfo => '',
-  # ->{nterminfo} is not needed because the terminfo format is self-describing 
-  # and we can just parse it directly from the data string.
+  # ->{nterminfo} is not needed
 
   # Parser
   caps        => [ (undef) x TB_CAP__COUNT ],
   cap_trie    => captrie->new(),
 
   # Buffers
-  inbuf       => "",
-  outbuf      => "",
+  inbuf       => '',
+  outbuf      => '',
   back        => cellbuf->new(),
   front       => cellbuf->new(),
 
@@ -1251,12 +1227,16 @@ $global = bless({
   orig_tios   => undef,
   has_orig_tios => 0,
 
-  # Error state
+  # (Error) state
   last_errno  => 0,
   errbuf      => "",
-
   initialized => 0,
-}, 'tb_global');
+  # ->{errbuf} is not needed
+
+  # Custom callbacks for escape sequence parsing
+  fn_extract_esc_pre  => undef,
+  fn_extract_esc_post => undef,
+};
 
 # ------------------------------------------------------------------------
 #  Implementation of the termbox2 API incl. helpers ----------------------
@@ -1454,8 +1434,8 @@ sub tb_set_clear_attrs {    # $int ($fg, $bg)
   my ($fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   } else {
     $fg += 0;
@@ -1475,11 +1455,11 @@ sub tb_set_cell {    # $int ($x, $y, $ch, $fg, $bg)
   my ($x, $y, $ch, $fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+      3 => _NONNEGINT,
+      4 => _NONNEGINT,
+      5 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return tb_set_cell_ex($x, $y, [$ch], 1, $fg, $bg);
@@ -1489,17 +1469,16 @@ sub tb_set_cell_ex {    # $int ($x, $y, \@ch, $nch, $fg, $bg)
   my ($x, $y, $ch, $nch, $fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, default => [], strict_type => 1 },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      6 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+      3 => _ARRAY0,
+      4 => _NONNEGINT,
+      5 => _NONNEGINT,
+      6 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
     return TB_ERR if @$ch != $nch;
   } else {
-    $ch // return TB_ERR;
-    $nch //= 0;
+    warn if @$ch != $nch;
   }
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
@@ -1515,9 +1494,9 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
   my ($x, $y, $ch) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+      3 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
 
@@ -1539,7 +1518,7 @@ sub tb_set_input_mode {    # $int ($mode)
   my ($mode) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1573,7 +1552,7 @@ sub tb_set_output_mode {    # $int ($mode)
   my ($mode) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1608,15 +1587,15 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
   my ($x, $y, $fg, $bg, $out_w, $str) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      5 => { required => 1, default => \0, strict_type => 1 },
-      6 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+      3 => _NONNEGINT,
+      4 => _NONNEGINT,
+      5 => _ANY,
+      6 => _STRING0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   } else {
-    $str //= '';
+    $str .= '';
   }
 
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1696,10 +1675,10 @@ sub tb_utf8_char_length {    # $length ($c)
   my ($c) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      1 => _STRING0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   } else {
-    $c //= '';
+    $c .= '';
   }
   return 0 if $c eq '';
   $c = bytes::substr($c, 0, 1);
@@ -1720,11 +1699,11 @@ sub tb_utf8_char_to_unicode {    # $length (\$out, $c)
   my ($out, $c) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \0, strict_type => 1 },
-      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      1 => _SCALAR0,
+      2 => _STRING0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   } else {
-    $c //= '';
+    $c .= '';
   }
   use bytes;
 
@@ -1756,11 +1735,11 @@ sub tb_utf8_unicode_to_char {    # $length (\$out, $c)
   my ($out, $c) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _SCALAR0,
+      2 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   } else {
-    $c //= 0;
+    $c += 0;
   }
 
   # Fast path for real Unicode scalar values (<= 0x10FFFF)
@@ -1805,7 +1784,7 @@ sub tb_strerror {    # $str ($err)
   my ($err) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      1 => _INT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   switch: for (int($err)) {
@@ -1901,7 +1880,7 @@ sub tb_iswprint {    # $int ($codepoint)
   my ($codepoint) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
   return tb_iswprint_ex($codepoint, undef);
@@ -1911,7 +1890,7 @@ sub tb_wcwidth {    # $int ($codepoint)
   my ($codepoint) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
   }
   if (TB_OPT_LIBC_WCHAR) {
@@ -1933,15 +1912,13 @@ sub tb_reset {    # $int ()
   @_ == 0 or return TB_ERR;
 
   # Keep tty ownership flag, reset everything else like termbox2.
-  my $ttyfd_open = $global->{ttyfd_open};
-  my $class = blessed($global) || 'tb_global';
-
-  $global = bless({
+  my $ttyfd_open = $global->{ttyfd_open} // -1;
+  $global = {
     ttyfd         => -1,
     rfd           => -1,
     wfd           => -1,
     ttyfd_open    => $ttyfd_open,
-    resize_pipe   => [-1, -1],
+    resize_pipefd => [-1, -1],
 
     width         => -1,
     height        => -1,
@@ -1974,32 +1951,31 @@ sub tb_reset {    # $int ()
     last_errno    => 0,
     errbuf        => '',
     initialized   => 0,
-  }, $class);
+
+    fn_extract_esc_pre  => undef,
+    fn_extract_esc_post => undef,
+  };
 
   return TB_OK;
 }
 
-sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $fmt, @args)
+sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
   my ($x, $y, $fg, $bg, $out_w, $fmt, @args) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      5 => { required => 1, default => \0, strict_type => 1 },
-      6 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      1 => _INT,
+      2 => _INT,
+      3 => _NONNEGINT,
+      4 => _NONNEGINT,
+      5 => _SCALAR0,
+      6 => _STRING0,
     } => { map { $_ => $_[$_-1] } 1..6 } or return TB_ERR;
   }
 
-  my $str;
-  local $@;
-  try: eval {
-    use warnings FATAL => 'all';
-    $str = sprintf($fmt, @args);
-  }; 
+  my $str = @args ? sprintf($fmt, @args) : $fmt;
   return TB_ERR 
-    if !defined($str) || length($str) >= TB_OPT_PRINTF_BUF;
+    if !defined($str) 
+    || length($str) >= TB_OPT_PRINTF_BUF;
 
   return tb_print_ex($x, $y, $fg, $bg, $out_w, $str);
 }
@@ -2028,8 +2004,8 @@ sub tb_deinit {    # $int ()
     }
   }
 
-  $SIG{'WINCH'} = 'DEFAULT';
-  foreach my $fd (@{ $global->{resize_pipe}}) {
+  $SIG{WINCH} = 'DEFAULT';
+  foreach my $fd (@{ $global->{resize_pipefd}}) {
     POSIX::close($fd) if $fd >= 0;
   }
 
@@ -2051,7 +2027,7 @@ sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
   my ($ch, $width) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
       2 => { required => 0, default => \undef, strict_type => 1 },
     } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
   }
@@ -2084,8 +2060,8 @@ sub tb_cluster_width {    # $int (\@cluster, $nch)
   my ($cluster, $nch) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => [], strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _ARRAY0,
+      2 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
     return -1 if $nch != @$cluster;
   }
@@ -2225,12 +2201,12 @@ sub load_terminfo_from_path {    # $int ($path, $term)
   my ($path, $term) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, default => '', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/.+/ },
+      1 => _STRING0,
+      2 => _STRING,
     } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
   } else {
-    $path // return TB_ERR;
-    $term // return TB_ERR;
+    $path .= '';
+    $term .= '';
   }
   my $rv;
   my $tmp;
@@ -2257,10 +2233,10 @@ sub read_terminfo_path {    # $int ($path)
   my ($path) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      1 => _STRING0,
     } => { map { $_ => $_[$_-1] } 1..1 } or return TB_ERR;
   } else {
-    $path // return TB_ERR;
+    $path .= '';
   }
 
   open(my $fp, '<:raw', $path)
@@ -2396,11 +2372,11 @@ sub get_terminfo_string {    # $str|undef ($offsets_pos, $offsets_len, $table_po
   my ($offsets_pos, $offsets_len, $table_pos, $table_size, $index) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+      3 => _NONNEGINT,
+      4 => _NONNEGINT,
+      5 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..5 } or return undef;
   }
 
@@ -2441,8 +2417,8 @@ sub get_terminfo_int16 {    # $int ($offset, \$val)
   my ($offset, $val) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      2 => { required => 1, default => \0, strict_type => 1 },
+      1 => _INT,
+      2 => _SCALAR0,
     } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
   }
   if ($offset < 0 || $offset + INT16_SIZE > length($global->{terminfo})) {
@@ -2450,6 +2426,121 @@ sub get_terminfo_int16 {    # $int ($offset, \$val)
     return TB_ERR;
   }
   $$val = unpack('s<', substr($global->{terminfo}, $offset, INT16_SIZE));
+  return TB_OK;
+}
+
+#
+# Resize handling helpers
+#
+
+sub init_resize_handler {    # $int ()
+  @_ == 0 or return TB_ERR;
+  my ($rfd, $wfd);
+  unless (($rfd, $wfd) = POSIX::pipe()) {
+    $global->{last_errno} = 0+ $!;
+    return TB_ERR_RESIZE_PIPE;
+  }
+
+  $global->{resize_pipefd} = [$rfd, $wfd];
+
+  $SIG{WINCH} = \&handle_resize;
+  return TB_OK;
+}
+
+sub resize_cellbufs {    # $int ()
+  @_ == 0 or return TB_ERR;
+  my $rv;
+  $rv = cellbuf_resize($global->{back}, $global->{width}, $global->{height});
+  return $rv if $rv != TB_OK;
+  $rv = cellbuf_resize($global->{front}, $global->{width}, $global->{height});
+  return $rv if $rv != TB_OK;
+  $rv = cellbuf_clear($global->{front});
+  return $rv if $rv != TB_OK;
+  $rv = send_clear();
+  return $rv if $rv != TB_OK;
+  return TB_OK;
+}
+
+sub handle_resize {    # void ($sig)
+  my ($sig) = @_;
+  if (STRICT) {
+    check {
+      1 => _INT,
+    } => { map { $_ => $_[$_-1] } 1..1 } or return;
+  } else {
+    $sig += 0;
+  }
+  local $! = $!;
+  my $sig_buf = pack('i', $sig);
+  POSIX::write($global->{resize_pipefd}[1], $sig_buf, length($sig_buf));
+  return;
+}
+
+sub update_term_size {    # $int ()
+  @_ == 0 or return TB_ERR;
+  my ($rv, $ioctl_errno);
+
+  return TB_OK if $global->{ttyfd} < 0;
+
+  my $fh = IO::File->new_from_fd($global->{ttyfd}, 'w');
+  return TB_OK if !$fh;
+
+  my $sz = pack('S4', 0, 0, 0, 0);
+
+  # Try ioctl TIOCGWINSZ
+  if (eval { require 'sys/ioctl.ph'; 1 } && ioctl($fh, &TIOCGWINSZ, $sz) == 1) {
+    my ($row, $col) = unpack('S4', $sz);
+    $global->{width}  = $col;
+    $global->{height} = $row;
+    return TB_OK;
+  }
+  $ioctl_errno = 0+ $!;
+
+  # Try >cursor(9999,9999), >u7, <u6
+  $rv = update_term_size_via_esc();
+  return TB_OK if $rv == TB_OK;
+
+  $global->{last_errno} = $ioctl_errno;
+  return TB_ERR_RESIZE_IOCTL;
+}
+
+sub update_term_size_via_esc {    # $int ()
+  @_ == 0 or return TB_ERR;
+
+  my $move_and_report = "\e[9999;9999H\e[6n";
+
+  my $write_rv = POSIX::write(
+    $global->{wfd},
+    $move_and_report,
+    length($move_and_report),
+  );
+  return TB_ERR_RESIZE_WRITE
+    if !defined($write_rv) 
+    || $write_rv != length($move_and_report);
+
+  my $rin = '';
+  vec($rin, $global->{rfd}, 1) = 1;
+
+  my $timeout = TB_RESIZE_FALLBACK_MS / 1000;
+  my $select_rv = select($rin, undef, undef, $timeout);
+  if ($select_rv != 1) {
+    $global->{last_errno} = 0+ $!;
+    return TB_ERR_RESIZE_POLL;
+  }
+
+  my $buf = '';
+  my $read_rv = POSIX::read($global->{rfd}, $buf, TB_OPT_READ_BUF);
+  if (!defined($read_rv) || $read_rv < 1) {
+    $global->{last_errno} = 0+ $!;
+    return TB_ERR_RESIZE_READ;
+  }
+
+  if ($buf !~ /\e\[(\d+);(\d+)R/) {
+    return TB_ERR_RESIZE_SSCANF;
+  }
+
+  $global->{width}  = $1;
+  $global->{height} = $2;
   return TB_OK;
 }
 
@@ -2506,7 +2597,7 @@ sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
 sub cap_trie_find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
   my ($buf, $nbuf, $last, $depth) = @_;
   my $trie = $global->{cap_trie} or return TB_ERR;
-  return $trie->find($buf, length($buf), $last, $depth);
+  return $trie->find($buf, $last, $depth);    # Perl does not need nbuf
 }
 
 sub cap_trie_deinit {    # $int ($node|undef)
@@ -2519,11 +2610,98 @@ sub cap_trie_deinit {    # $int ($node|undef)
 # Event extraction helpers
 #
 
+sub wait_event {
+  my ($event, $timeout) = @_;
+  if (STRICT) {
+    check {
+      1 => _INSTANCE,
+      2 => _INT,
+    } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
+  } else {
+    $timeout += 0;
+  }
+
+  my $rv;
+  my $buf = '';
+  state $empty_event = Termbox::Event->new();
+
+  alias: for ($event) {
+  %$event = %$empty_event;
+
+  # Fast path: buffered input already yields a full event
+  $rv = extract_event($event);
+  return TB_OK if $rv == TB_OK;
+
+  my $rfd      = $global->{rfd};
+  my $resizefd = $global->{resize_pipefd}[0];
+
+  # Perl select timeout is seconds as float; undef means block forever
+  my $timeout_sec = ($timeout < 0) ? undef : ($timeout / 1000);
+
+  do {
+    my $rin = '';
+    vec($rin, $rfd,      1) = 1;
+    vec($rin, $resizefd, 1) = 1;
+
+    my $rout = $rin;
+
+    my $select_rv = select($rout, undef, undef, $timeout_sec);
+
+    if ($select_rv < 0) {
+      # Let EINTR/EAGAIN bubble up
+      $global->{last_errno} = 0+ $!;
+      return TB_ERR_POLL;
+    }
+    if ($select_rv == 0) {
+      return TB_ERR_NO_EVENT;
+    }
+
+    my $tty_has_events    = vec($rout, $rfd,      1);
+    my $resize_has_events = vec($rout, $resizefd, 1);
+
+    if ($tty_has_events) {
+      my $buf = '';
+      my $read_rv = POSIX::read($rfd, $buf, TB_OPT_READ_BUF);
+      if (!defined($read_rv) || $read_rv < 0) {
+        $global->{last_errno} = 0+ $!;
+        return TB_ERR_READ;
+      } elsif ($read_rv > 0) {
+        bytebuf_nputs(\$global->{inbuf}, $buf, $read_rv);
+      }
+    }
+
+    if ($resize_has_events) {
+      my $ignore = '';
+      # Drain one resize notification (size is not critical here)
+      POSIX::read($resizefd, $ignore, 4);
+      # TODO: Harden against errors encountered mid-resize
+      $rv = update_term_size();
+      return $rv if $rv != TB_OK;
+      $rv = resize_cellbufs();
+      return $rv if $rv != TB_OK;
+
+      $event->{type} = TB_EVENT_RESIZE;
+      $event->{w}    = $global->{width};
+      $event->{h}    = $global->{height};
+      return TB_OK;
+    }
+
+    # Try to extract an event after consuming input / handling resize
+    %$event = %$empty_event;
+    $rv = extract_event($event);
+    return TB_OK if $rv == TB_OK;
+
+  } while ($timeout < 0);
+
+  return $rv;
+  } #/ alias:
+}
+
 sub extract_event {   # $int ($event)
   my ($event) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my $trie = $global->{cap_trie};
@@ -2583,11 +2761,241 @@ sub extract_event {   # $int ($event)
   } #/ alias:
 }
 
+sub extract_esc {    # $int ($event)
+  my ($event) = @_;
+  if (STRICT) {
+    check {
+      1 => _INSTANCE,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  }
+
+  my $rv;
+
+  $rv = extract_esc_user($event, 0);
+  return $rv if $rv == TB_OK || $rv == TB_ERR_NEED_MORE;
+
+  $rv = extract_esc_cap($event);
+  return $rv if $rv == TB_OK || $rv == TB_ERR_NEED_MORE;
+
+  $rv = extract_esc_mouse($event);
+  return $rv if $rv == TB_OK || $rv == TB_ERR_NEED_MORE;
+
+  $rv = extract_esc_user($event, 1);
+  return $rv if $rv == TB_OK || $rv == TB_ERR_NEED_MORE;
+
+  return TB_ERR;
+}
+
+sub extract_esc_user {    # $int ($event, $is_post)
+  my ($event, $is_post) = @_;
+  if (STRICT) {
+    check {
+      1 => _INSTANCE,
+      2 => _BOOL,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  }
+
+  my $fn = $is_post ? $global->{fn_extract_esc_post}
+                    : $global->{fn_extract_esc_pre};
+  return TB_ERR unless ref($fn) eq 'CODE';
+
+  my $consumed = 0;
+  my $rv = $fn->($event, \$consumed);
+
+  if ($rv == TB_OK) {
+    bytebuf_shift(\$global->{inbuf}, $consumed);
+  }
+
+  return $rv if $rv == TB_OK || $rv == TB_ERR_NEED_MORE;
+  return TB_ERR;
+}
+
+sub extract_esc_mouse {    # $int ($event)
+  my ($event) = @_;
+  if (STRICT) {
+    check {
+      1 => _INSTANCE,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  }
+
+  use bytes;
+  alias: for my $in ($global->{inbuf}) {
+  my @in = unpack('C*', $in);
+
+  # Bail if not enough to determine type
+  if (@in < 2) {
+    return TB_ERR_NEED_MORE;
+  } elsif ($in[1] != ord('[')) {
+    return TB_ERR;
+  } elsif (@in < 3) {
+    return TB_ERR_NEED_MORE;
+  }
+
+  # Discern type of mouse event from 3rd byte
+  my $type = TYPE_VT200;
+  if ($in[2] == ord('M')) {
+    # X10 mouse encoding, the simplest one: \x1b [ M Cb Cx Cy
+    $type = TYPE_VT200;
+  }
+  elsif ($in[2] == ord('<')) {
+    # xterm 1006 extended mode or urxvt 1015 extended mode
+    # xterm: \x1b [ < Cb ; Cx ; Cy (M or m)
+    $type = TYPE_1006;
+  }
+  else {
+    # urxvt: \x1b [ Cb ; Cx ; Cy M
+    $type = TYPE_1015;
+  }
+
+  my $buf_shift = 0;
+
+  switch_parse: for ($type) {
+    case: TYPE_VT200 == $_ and do {
+      # In this mode, we need 6 bytes
+      return TB_ERR_NEED_MORE if @in < 6;
+
+      my $b = $in[3] - 0x20;
+
+      local $_;
+      switch: for ($b & 3) {
+        case: 0 == $_ and do {
+          $event->{key} = ($b & 64) ? TB_KEY_MOUSE_WHEEL_UP
+                                    : TB_KEY_MOUSE_LEFT;
+          last;
+        };
+        case: 1 == $_ and do {
+          $event->{key} = ($b & 64) ? TB_KEY_MOUSE_WHEEL_DOWN
+                                    : TB_KEY_MOUSE_MIDDLE;
+          last;
+        };
+        case: 2 == $_ and do {
+          $event->{key} = TB_KEY_MOUSE_RIGHT;
+          last;
+        };
+        case: 3 == $_ and do {
+          $event->{key} = TB_KEY_MOUSE_RELEASE;
+          last;
+        };
+        default: {
+          return TB_ERR;
+        };
+      }
+
+      if (($b & 32) != 0) {
+        $event->{mod} |= TB_MOD_MOTION;
+      }
+
+      # The coord is 1,1 for upper left
+      $event->{x} = $in[4] - 0x21;
+      $event->{y} = $in[5] - 0x21;
+
+      # Eat 6 bytes
+      $buf_shift = 6;
+      last;
+    };
+
+    case: TYPE_1006 == $_ ||    # fallthrough
+          TYPE_1015 == $_ and do 
+    {
+      my @num = (-1, -1, -1);
+      my $num_i = 0;
+      my $cur_num = -1;
+      my $trail = ord(' ');
+
+      my $i = 2;
+      ++$i if $type == TYPE_1006;    # skip '<'
+
+      # Parse %d;%d;%d[mM] into @num
+      while ($i < @in && $num_i < 3) {
+        my $c = $in[$i];
+
+        if ($c >= ord('0') && $c <= ord('9')) {
+          # Digit
+          $cur_num = 0 if $cur_num == -1;
+          $cur_num *= 10;
+          $cur_num += $c - ord('0');
+          ++$i;
+          next;
+        }
+
+        if ($cur_num != -1
+          && (($num_i < 2 && $c == ord(';'))
+            || ($num_i == 2 && ($c == ord('m') || $c == ord('M')))))
+        {
+          # We're at a semi-colon, 'm', or 'M' and we have a number
+          $num[$num_i] = $cur_num;
+          ++$num_i;
+          $cur_num = -1;
+          $trail = $c;
+          ++$i;
+          next;
+        }
+
+        # Something else; not a mouse event
+        return TB_ERR;
+      }
+
+      # If we didn't get to the 3rd number, we need more
+      return TB_ERR_NEED_MORE if $num[2] == -1;
+
+      # We have a valid mouse event, eat i bytes from the buffer
+      $buf_shift = $i;
+
+      $num[0] -= 0x20 if $type == TYPE_1015;
+
+      local $_;
+      switch: for ($num[0] & 3) {
+        case: 0 == $_ and do {
+          $event->{key} = ($num[0] & 64) ? TB_KEY_MOUSE_WHEEL_UP
+                                         : TB_KEY_MOUSE_LEFT;
+          last;
+        };
+        case: 1 == $_ and do {
+          $event->{key} = ($num[0] & 64) ? TB_KEY_MOUSE_WHEEL_DOWN
+                                         : TB_KEY_MOUSE_MIDDLE;
+          last;
+        };
+        case: 2 == $_ and do {
+          $event->{key} = TB_KEY_MOUSE_RIGHT;
+          last;
+        };
+        case: 3 == $_ and do {
+          $event->{key} = TB_KEY_MOUSE_RELEASE;
+          last;
+        };
+        default: {
+          return TB_ERR;
+        };
+      }
+
+      # On xterm mouse release is signaled by lowercase m
+      if ($trail == ord('m')) {
+        $event->{key} = TB_KEY_MOUSE_RELEASE;
+      }
+
+      if (($num[0] & 32) != 0) {
+        $event->{mod} |= TB_MOD_MOTION;
+      }
+
+      $event->{x} = ($num[1] - 1 < 0) ? 0 : $num[1] - 1;
+      $event->{y} = ($num[2] - 1 < 0) ? 0 : $num[2] - 1;
+      last;
+    };
+  }
+
+  substr($in, 0, $buf_shift, '') if $buf_shift > 0;
+
+  $event->{type} = TB_EVENT_MOUSE;
+
+  return TB_OK;
+  } #/ alias:
+}
+
 sub extract_esc_cap {
   my ($event) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my $trie = $global->{cap_trie};
@@ -2632,15 +3040,17 @@ sub cell_set {    # $int ($cell, $ch, $nch, $fg, $bg)
   my ($cell, $ch, $nch, $fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, default => [], strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      5 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INSTANCE,
+      2 => _ARRAY0,
+      3 => _NONNEGINT,
+      4 => _NONNEGINT,
+      5 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
     return TB_ERR if @$ch != $nch;
   } else {
-    ref $ch or return TB_ERR;
+    ref $ch eq 'ARRAY' or return TB_ERR;
+    $fg += 0;
+    $bg += 0;
   }
   return $cell->set(pack('U*', @$ch), $fg, $bg);
 }
@@ -2649,8 +3059,8 @@ sub cell_reserve_ech {    # $int ($cell, $n)
   my ($cell, $n) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INSTANCE,
+      2 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_OPT_EGC ? TB_OK : TB_ERR;
@@ -2660,7 +3070,7 @@ sub cell_free {    # $int ($cell)
   my ($cell) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $cell->{ch} = "\0";
@@ -2700,7 +3110,7 @@ sub cellbuf_free {    # $int ($c)
   my ($c) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
+      1 => _INSTANCE,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   for my $cell (@{ $c->{cells} || [] }) {
@@ -2722,10 +3132,10 @@ sub cellbuf_get {    # $int ($c, $x, $y, \$out)
   my ($c, $x, $y, $out) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, allow => \&blessed },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      4 => { required => 1, allow => \&CORE::ref },
+      1 => _INSTANCE,
+      2 => _NONNEGINT,
+      3 => _NONNEGINT,
+      4 => _REF0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $$out = $c->get($x, $y);
@@ -2748,8 +3158,8 @@ sub send_literal {   # $int ($rv, $a)
   my ($rv, $a) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      1 => _NONNEGINT,
+      2 => _STRING0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $global->{outbuf} .= $a;
@@ -2760,9 +3170,9 @@ sub send_num {   # $int ($rv, \$buf, $n)
   my ($rv, $buf, $n) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, default => \'', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
+      2 => _SCALAR0,
+      3 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $global->{outbuf} .= sprintf('%u', $n);
@@ -2805,8 +3215,8 @@ sub send_attr {    # $int ($fg, $bg)
   my ($fg, $bg) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
   }
   my $rv;
@@ -2940,10 +3350,10 @@ sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
   my ($cfg, $cbg, $fg_is_default, $bg_is_default) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      3 => { required => 1, default => 0, allow => qr/\A[01]?\z/ },
-      4 => { required => 1, default => 0, allow => qr/\A[01]?\z/ },
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+      3 => _BOOL,
+      4 => _BOOL,
     } => { map { $_ => $_[$_-1] } 1..4 } or return TB_ERR;
   }
   my $rv;
@@ -3022,8 +3432,8 @@ sub send_cursor_if {    # $int ($x, $y)
   my ($x, $y) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      1 => _INT,
+      2 => _INT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   my $rv;
@@ -3041,9 +3451,9 @@ sub send_char {    # $int ($x, $y, $ch)
   my ($x, $y, $ch) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INT,
+      2 => _INT,
+      3 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return send_cluster($x, $y, [$ch], 1);
@@ -3053,10 +3463,10 @@ sub send_cluster {    # $int ($x, $y, \@ch, $nch)
   my ($x, $y, $ch, $nch) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-      3 => { required => 1, default => [], strict_type => 1 },
-      4 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _INT,
+      2 => _INT,
+      3 => _ARRAY0,
+      4 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
     return TB_ERR if @$ch != $nch;
   }
@@ -3083,8 +3493,8 @@ sub convert_num {    # $len ($num, \$buf)
   my ($num, $buf) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-      2 => { required => 1, default => \'', strict_type => 1 },
+      1 => _NONNEGINT,
+      2 => _SCALAR0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
   }
   $$buf = sprintf('%u', $num);
@@ -3095,16 +3505,18 @@ sub convert_num {    # $len ($num, \$buf)
 # Byte buffer related helpers
 #
 
-sub bytebuf_puts {    # $int (\$buf, $str|undef)
+sub bytebuf_puts {    # $int (\$buf, $str)
   my ($b, $str) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
+      1 => _SCALAR0,
+      2 => _STRING0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $str // return TB_ERR;
   }
   # Nothing to do for empty caps
-  $$b .= $str if defined($str) && bytes::length($str);
+  $$b .= $str if bytes::length($str);
   return TB_OK
 }
 
@@ -3112,10 +3524,12 @@ sub bytebuf_nputs {    # $int (\$buf, $str, $nstr)
   my ($b, $str, $nstr) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, default => '', strict_type => 1 },
-      3 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _SCALAR0,
+      2 => _STRING0,
+      3 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $str .= '';
   }
   $$b .= bytes::substr($str, 0, $nstr);
   return TB_OK;
@@ -3125,8 +3539,8 @@ sub bytebuf_shift {    # $int (\$buf, $n)
   my ($b, $n) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _SCALAR0,
+      2 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   use bytes;
@@ -3139,8 +3553,8 @@ sub bytebuf_flush {    # $int (\$buf, $fd)
   my ($b, $fd) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+      1 => _SCALAR0,
+      2 => _INT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   use bytes;
@@ -3159,8 +3573,8 @@ sub bytebuf_reserve {    # $int (\$buf, $sz)
   my ($b, $sz) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \'', strict_type => 1 },
-      2 => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+      1 => _SCALAR0,
+      2 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   return TB_OK;
@@ -3170,7 +3584,7 @@ sub bytebuf_free {    # $int (\$buf)
   my ($b) = @_;
   if (STRICT) {
     check {
-      1 => { required => 1, default => \'', strict_type => 1 },
+      1 => _SCALAR0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
   $$b = '';

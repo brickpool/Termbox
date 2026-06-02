@@ -1,60 +1,36 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
+use utf8;
 
 use Test::More;
-use Test::Exception;
-use Devel::StrictMode;
 
-if ($^O eq 'MSWin32') {
-  plan skip_all => 'Test irrelevant for Windows OS';
-} else {
-  my $has_tty = !$ENV{AUTOMATED_TESTING} && -w '/dev/tty';
-  if (!$has_tty) {
-    plan skip_all => 'Test requires a TTY device (not available)';
-  }
+BEGIN {
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox', qw( :return );
 }
 
-use_ok 'Termbox::Go::Common', qw( :color :attr );
-use_ok 'Termbox::Go::Terminal', qw( :api );
+subtest 'tb_printf_inner - error handling' => sub {
+  $Termbox::global->{initialized} = 1;
+  $Termbox::global->{width} = 80;
+  $Termbox::global->{height} = 24;
 
-sub tb_printf { # $errno ($x, $y, $fg, $bg, $fmt, ...)
-  my ($x, $y, $fg, $bg, $fmt, @vl) = @_;
-  my $str = sprintf($fmt, @vl);
-	for my $c (split //, $str) {
-		die "$!" if SetCell($x++, $y, $c, $fg, $bg) != 0;
-	}
-  return 0;
-}
+  my $rv = Termbox::init_cellbuf();
+  plan skip_all => 'init_cellbuf failed in this environment'
+    if $rv != TB_OK();
 
-lives_ok { Init() == 0 or die $! } 'Init()';
+  plan tests => 3;
 
-my ($w, $h);
-lives_ok { ($w, $h) = Size(); die $! if $! } 'Size()';
+  my $buf = '';
+  $rv = Termbox::tb_printf_inner(0, 0, 0, 0, \$buf, 'Hello');
+  is($rv, TB_OK(), 'tb_printf_inner returns valid result');
 
-my $bg = ColorBlack();
-my $red = ColorRed();
-my $green = ColorGreen();
-my $blue = ColorBlue();
-ok $bg && $red && $green && $blue, ':color';
+  $rv = Termbox::tb_printf_inner(-1, -1, 0, 0, \$buf, 'X');
+  ok($rv == TB_ERR() || $rv == TB_ERR_OUT_OF_BOUNDS(), 
+    'tb_printf_inner handles invalid position');
 
-my $y = 0;
-my $has_version = length($Termbox::Go::Terminal::VERSION) > 0;
-subtest 'tb_printf()' => sub {
-  plan tests => 4;
-  lives_ok { tb_printf(0, $y++, 0, 0, "has_version=%s", $has_version ? 'y' : 'n') == 0 or die };
-  lives_ok { tb_printf(0, $y++, $red, $bg, "width=%d", $w) == 0 or die };
-  lives_ok { tb_printf(0, $y++, $green, $bg, "height=%d", $h) == 0 or die };
-  lives_ok { no strict 'refs';
-    foreach my $attr (qw(AttrBold AttrUnderline AttrCursive AttrReverse AttrBlink AttrDim)) {
-      tb_printf(0, $y++, $blue | &$attr(), $bg, "attr=%s", $attr) == 0 or die;
-      do { Flush() == 0 or die } if STRICT;
-      sleep(0+STRICT);
-    }
-  };
+  $rv = Termbox::tb_printf_inner(0, 0, 0, 0, \$buf, '');
+  is($rv, TB_OK(), 'tb_printf_inner handles empty format string');
 };
 
-lives_ok { Flush() == 0 or die $! } 'Flush()';
-sleep(0+STRICT);
-lives_ok { Close() == 0 or die $! } 'Close()';
-
-done_testing;
+done_testing();

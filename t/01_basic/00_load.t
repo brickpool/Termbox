@@ -4,7 +4,9 @@ use warnings;
 
 use Test::More;
 
-use_ok 'Termbox::PP::WCWidth';
-use_ok 'Termbox::PP';
+BEGIN {
+  use_ok 'Termbox::PP::WCWidth';
+  use_ok 'Termbox::PP::WCWidth::Tables';
+}
 
 done_testing;

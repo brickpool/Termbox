@@ -15,7 +15,7 @@ subtest 'global default shape after tb_reset' => sub {
   is(Termbox::tb_reset(), TB_OK(), 'tb_reset returns TB_OK');
 
   my $g = $Termbox::global;
-  isa_ok($g, 'tb_global', 'global object class');
+  is(ref($g), 'HASH', 'global is a hash-ref');
 
   is($g->{initialized}, 0, 'initialized defaults to 0');
   is($g->{width}, -1, 'width defaults to -1');
@@ -27,16 +27,19 @@ subtest 'global default shape after tb_reset' => sub {
 
   is($g->{fg}, TB_DEFAULT(), 'fg defaults to TB_DEFAULT');
   is($g->{bg}, TB_DEFAULT(), 'bg defaults to TB_DEFAULT');
-  is($g->{input_mode}, TB_INPUT_ESC(), 'input_mode defaults to TB_INPUT_ESC');
-  is($g->{output_mode}, TB_OUTPUT_NORMAL(), 'output_mode defaults to TB_OUTPUT_NORMAL');
+  is($g->{input_mode}, TB_INPUT_ESC(), 
+    'input_mode defaults to TB_INPUT_ESC');
+  is($g->{output_mode}, TB_OUTPUT_NORMAL(), 
+    'output_mode defaults to TB_OUTPUT_NORMAL');
 
-  is(ref($g->{resize_pipe}), 'ARRAY', 'resize_pipe is an array-ref');
-  is(scalar(@{ $g->{resize_pipe} }), 2, 'resize_pipe has two entries');
-  is($g->{resize_pipe}[0], -1, 'resize_pipe[0] defaults to -1');
-  is($g->{resize_pipe}[1], -1, 'resize_pipe[1] defaults to -1');
+  is(ref($g->{resize_pipefd}), 'ARRAY', 'resize_pipefd is an array-ref');
+  is(scalar(@{ $g->{resize_pipefd} }), 2, 'resize_pipefd has two entries');
+  is($g->{resize_pipefd}[0], -1, 'resize_pipefd[0] defaults to -1');
+  is($g->{resize_pipefd}[1], -1, 'resize_pipefd[1] defaults to -1');
 
   is(ref($g->{caps}), 'ARRAY', 'caps is an array-ref');
-  is(scalar(@{ $g->{caps} }), Termbox::TB_CAP__COUNT(), 'caps has TB_CAP__COUNT entries');
+  is(scalar(@{ $g->{caps} }), Termbox::TB_CAP__COUNT(), 
+    'caps has TB_CAP__COUNT entries');
 
   is(ref($g->{back}), 'cellbuf', 'back buffer is a cellbuf');
   is(ref($g->{front}), 'cellbuf', 'front buffer is a cellbuf');

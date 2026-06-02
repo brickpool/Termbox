@@ -7,7 +7,9 @@ use Test::Exception;
 use Data::Dumper;
 use Devel::StrictMode;
 
-use_ok 'Termbox::PP';
+BEGIN {
+  use_ok 'Termbox::PP';
+}
 
 my $buf;
 subtest 'cellbuf->new()' => sub {

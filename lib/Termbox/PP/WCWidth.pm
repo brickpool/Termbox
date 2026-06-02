@@ -10,7 +10,7 @@
 #                 2026 Elizabeth Mattijsen <lizmat@mastodon.social>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024-2026 J. Schneider
+#   Author: 2024,2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox::PP::WCWidth;
