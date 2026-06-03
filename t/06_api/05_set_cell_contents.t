@@ -90,45 +90,35 @@ subtest 'set-cell APIs after init' => sub {
 
 subtest 'tb_get_cell basic behaviour' => sub {
   plan tests => 4;
+  my $cell;
 
-  # Mock cell object
-  my $cell = bless {}, 'TestCell';
-  no warnings 'redefine';
-  local *TestCell::get = sub {
-    my ($self, $x, $y) = @_;
-    return undef if $x > 10 || $y > 10;
-    return { ch => 'x', fg => 1, bg => 2 };
-  };
+  # not initialized
+  is(
+    tb_get_cell(1, 1, 0, \$cell),
+    TB_ERR_NOT_INIT,
+    'fails when not initialized'
+  );
 
   # initialized
   local $Termbox::global->{initialized} = 1;
-  local $Termbox::global->{front} = undef;
-  local $Termbox::global->{back}  = undef;
-
+  local $Termbox::global->{front}       = cellbuf->new();
+  local $Termbox::global->{back}        = cellbuf->new();
+  $Termbox::global->{front}->init(2, 2);
+  $Termbox::global->{back}->init(2, 2);
   is(
-    tb_get_cell(1, 1, 0, $cell),
+    tb_get_cell(1, 1, 0, \$cell),
     TB_OK,
     'tb_get_cell returns TB_OK'
   );
-
-  is(
-    ref($Termbox::global->{front}),
-    'HASH',
+  isa_ok(
+    $Termbox::global->{front},
+    'cellbuf',
     'cell stored in front buffer'
   );
-
   is(
-    tb_get_cell(99, 99, 0, $cell),
+    tb_get_cell(99, 99, 0, \$cell),
     TB_ERR_OUT_OF_BOUNDS,
     'out of bounds returns TB_ERR_OUT_OF_BOUNDS'
-  );
-
-  # not initialized
-  local $Termbox::global->{initialized} = 0;
-  is(
-    tb_get_cell(1, 1, 0, $cell),
-    TB_ERR_NOT_INIT,
-    'fails when not initialized'
   );
 };
 

@@ -835,9 +835,18 @@ sub Termbox::Cell::fg { 0+ $_[0]->{fg} }
 sub Termbox::Cell::bg { 0+ $_[0]->{bg} }
 if (TB_OPT_EGC) {
   no warnings 'once';
-  *Termbox::Cell::egc  = sub { [ unpack('U*', $_[0]->{ch}), 0 ] };
-  *Termbox::Cell::nech = sub { $_[0]->{ch} =~ /\X/ ? length($_[0]->{ch}) : 0 };
-  *Termbox::Cell::cech = sub { 0+ length($_[0]->{ch}) };
+  *Termbox::Cell::ech = sub {
+    my $ch = $_[0]->{ch};
+    length($ch) > 1 ? [ unpack('U*', $ch) ] : undef;
+  };
+  *Termbox::Cell::nech = sub {
+    my $ch = $_[0]->{ch};
+    $ch =~ /\X/ ? (length($ch) > 1 ? length($ch) : 0) : 0;
+  };
+  *Termbox::Cell::cech = sub {
+    my $ech = $_[0]->ech;
+    $ech ? scalar(@$ech) : 0;
+  };
 }
 
 sub Termbox::Cell::set {    # $int ($ch, $fg, $bg)
@@ -968,7 +977,7 @@ sub cellbuf::clear {    # $int ()
   return TB_OK;
 }
 
-sub cellbuf::get {    # $int ($x, $y)
+sub cellbuf::get {    # $cell ($x, $y)
   my ($c, $x, $y) = @_;
   if (STRICT) {
     check {
@@ -977,7 +986,6 @@ sub cellbuf::get {    # $int ($x, $y)
       3 => _NONNEGINT,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
   }
-  return undef unless $c->in_bounds($x, $y);
   return $c->{cells}[ $x + $y * $c->{width} ];
 }
 
@@ -1032,7 +1040,9 @@ sub cellbuf::resize {     # $int ($width, $height)
     for ($y = 0; $y < $minh; $y++) {
       my ($src, $dst);
       $src = $prev->[($y * $ow) + $x];
-      $dst = $c->get($x, $y) // return TB_ERR_OUT_OF_BOUNDS;
+      return TB_ERR_OUT_OF_BOUNDS unless $c->in_bounds($x, $y);
+      $dst = $c->get($x, $y);
+      return TB_ERR unless defined $dst;
       $rv = $dst->copy($src);
       return $rv if $rv != TB_OK;
     }
@@ -1109,7 +1119,7 @@ sub captrie::best_match {    # $s|undef ($buf)
   }
   return undef unless length($buf);
   my $alt = $self->{alt};
-  return undef unless defined($alt);
+  return undef unless defined $alt;
   return $1 if $buf =~ /\A($alt)/s;
   return undef;
 }
@@ -1259,7 +1269,7 @@ $global = {
 # Forwarding declarations of the public termbox API. 
 #
 
-# Initialize the termbox library.
+# Initialize the termbox library
 sub tb_init;
 sub tb_init_file;
 sub tb_init_fd;
@@ -1270,26 +1280,26 @@ sub tb_shutdown;
 sub tb_width;
 sub tb_height;
 
-# Clear the internal back buffer.
+# Clear the internal back buffer
 sub tb_clear;
 sub tb_set_clear_attrs;
 
-# Synchronize the internal back buffer with the terminal by writing to tty.
+# Synchronize the internal back buffer with the terminal by writing to tty
 sub tb_present;
 
-# Clear the internal front buffer and force a complete re-render.
+# Clear the internal front buffer and force a complete re-render
 sub tb_invalidate;
 
-# Set the position of the cursor.
+# Set the position of the cursor
 sub tb_set_cursor;
 sub tb_hide_cursor;
 
-# Set cell contents in the internal back buffer at the specified position.
+# Set cell contents in the internal back buffer at the specified position
 sub tb_set_cell;
 sub tb_set_cell_ex;
 sub tb_extend_cell;
 
-# Return a reference to the cell at the specified position.
+# Return a reference to the cell at the specified position
 sub tb_get_cell;
 
 # Set the input and output mode
@@ -1303,18 +1313,18 @@ sub tb_poll_event;
 # Internal termbox fds that can be used with 'poll', 'select'
 sub tb_get_fds;
 
-# Print and printf functions.
+# Print and printf functions
 sub tb_print;
 sub tb_printf;
 sub tb_print_ex;
 sub tb_printf_ex;
 
-# Send raw bytes to terminal.
+# Send raw bytes to terminal
 sub tb_send;
 sub tb_sendf;
 
-# Deprecated
-sub tb_set_func;
+# Set custom callbacks for escape sequence parsing
+sub tb_set_func;    # Deprecated
 
 # UTF-8 utility functions
 sub tb_utf8_char_length;
@@ -1418,6 +1428,94 @@ sub bytebuf_free;
 # ------------------------------------------------------------------------
 
 #
+# Initialize the termbox library
+#
+
+sub tb_init {    # $int ()
+  @_ == 0 or return TB_ERR;
+  return tb_init_file('/dev/tty');
+}
+
+sub tb_init_file {    # $int ($path)
+  my ($path) = @_;
+  if (STRICT) {
+    check {
+      1 => _STRING,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $path .= '';
+  }
+  return TB_ERR_INIT_ALREADY if $global->{initialized};
+
+  my $ttyfd = POSIX::open($path, POSIX::O_RDWR);
+  if (!defined $ttyfd || $ttyfd < 0) {
+    $global->{last_errno} = 0+ $!;
+    return TB_ERR_INIT_OPEN;
+  }
+
+  $global->{ttyfd_open} = 1;
+  return tb_init_fd($ttyfd);
+}
+
+sub tb_init_fd {    # $int ($ttyfd)
+  my ($ttyfd) = @_;
+  if (STRICT) {
+    check {
+      1 => _NONNEGINT,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $ttyfd += 0;
+  }
+  return tb_init_rwfd($ttyfd, $ttyfd);
+}
+
+sub tb_init_rwfd {    # $int ($rfd, $wfd)
+  my ($rfd, $wfd) = @_;
+  if (STRICT) {
+    check {
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $rfd += 0;
+    $wfd += 0;
+  }
+
+  tb_reset();
+  $global->{ttyfd} =
+    POSIX::isatty($rfd) ? $rfd :
+    POSIX::isatty($wfd) ? $wfd :
+    -1;
+  $global->{rfd} = $rfd;
+  $global->{wfd} = $wfd;
+
+  my $rv;
+  for (1) {
+    $rv = init_term_attrs();        last if $rv != TB_OK;
+    $rv = init_term_caps();         last if $rv != TB_OK;
+    $rv = init_cap_trie();          last if $rv != TB_OK;
+    $rv = init_resize_handler();    last if $rv != TB_OK;
+    $rv = send_init_escape_codes(); last if $rv != TB_OK;
+    $rv = send_clear();             last if $rv != TB_OK;
+    $rv = update_term_size();       last if $rv != TB_OK;
+    $rv = init_cellbuf();           last if $rv != TB_OK;
+
+    $global->{initialized} = 1;
+  };
+
+  tb_deinit() if $rv != TB_OK;
+
+  return $rv;
+}
+
+sub tb_shutdown {    # $int ()
+  @_ == 0 or return TB_ERR;
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+  tb_deinit();
+  return TB_OK;
+}
+
+#
 # Return the size of the internal back buffer
 #
 
@@ -1434,7 +1532,7 @@ sub tb_height {    # $int ()
 }
 
 #
-# Clear the internal back buffer.
+# Clear the internal back buffer
 #
 
 sub tb_clear {    # $int ()
@@ -1461,7 +1559,148 @@ sub tb_set_clear_attrs {    # $int ($fg, $bg)
 }
 
 #
-# Set cell contents in the internal back buffer at the specified position.
+# Synchronize the internal back buffer with the terminal by writing to tty
+#
+
+sub tb_present {    # $int ()
+  @_ == 0 or return TB_ERR;
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+
+  my $rv;
+
+  # TODO: assert $global->{back}[width,height] == global->{front}[width,height]
+
+  $global->{last_x} = -1;
+  $global->{last_y} = -1;
+
+  my ($x, $y, $i);
+  for ($y = 0; $y < $global->{front}{height}; $y++) {
+    for ($x = 0; $x < $global->{front}{width}; ) {
+      return TB_ERR_OUT_OF_BOUNDS unless $global->{back}->in_bounds($x, $y);
+
+      my $back  = $global->{back}->get($x, $y);
+      return TB_ERR unless defined $back;
+      my $front = $global->{front}->get($x, $y);
+      return TB_ERR unless defined $front;
+
+      my $w;
+      if (TB_OPT_EGC && $back->{ch} =~ /\X/) {
+        my $ech = [ unpack 'U*', $back->{ch} ];
+        $w = tb_cluster_width($ech, scalar @$ech);
+      } else {
+        $w = tb_wcwidth(ord($back->{ch}));
+      }
+      $w = 1 if $w < 1;    # wcwidth returns -1 for invalid codepoints
+
+      if (cell_cmp($back, $front) != 0) {
+        %$front = %$back;
+
+        send_attr($back->{fg}, $back->{bg});
+        if ($w > 1 && $x >= $global->{front}{width} - ($w - 1)) {
+          # Not enough room for wide char, send spaces
+          for ($i = $x; $i < $global->{front}{width}; $i++) {
+            send_char($i, $y, ord(' '));
+          }
+        } else {
+          if (TB_OPT_EGC && $back->{ch} =~ /\X/) {
+            my $ech = [ unpack 'U*', $back->{ch} ];
+            send_cluster($x, $y, $ech, scalar @$ech);
+          } else {
+            send_char($x, $y, ord($back->{ch}));
+          }
+
+          # When wcwidth>1, we need to advance the cursor by more
+          # than 1, thereby skipping some cells. Set these skipped
+          # cells to an invalid codepoint in the front buffer, so
+          # that if this cell is later replaced by a wcwidth==1
+          # char, we'll get a cell_cmp diff for the skipped cells
+          # and properly re-render.
+          for ($i = 1; $i < $w; $i++) {
+            return TB_ERR_OUT_OF_BOUNDS 
+              unless $global->{front}->in_bounds($x + $i, $y);
+            my $front_wide = $global->{front}->get($x + $i, $y);
+            return TB_ERR unless defined $front_wide;
+            my $invalid = "\x{fffd}";
+            $rv = $front_wide->set($invalid, -1, -1);
+            return $rv if $rv != TB_OK;
+          }
+        }
+      }
+      $x += $w;
+    }
+  }
+
+  $rv = send_cursor_if($global->{cursor_x}, $global->{cursor_y});
+  return $rv if $rv != TB_OK;
+  $rv = bytebuf_flush(\$global->{out}, $global->{wfd});
+  return $rv if $rv != TB_OK;
+
+  return TB_OK;
+}
+
+#
+# Clear the internal front buffer and force a complete re-render
+#
+
+sub tb_invalidate {    # $int ()
+  @_ == 0 or return TB_ERR;
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+  my $rv = resize_cellbufs();
+  return $rv if $rv != TB_OK;
+  return TB_OK;
+}
+
+#
+# Set the position of the cursor
+#
+
+sub tb_set_cursor {    # $int ($cx, $cy)
+  my ($cx, $cy) = @_;
+  if (STRICT) {
+    check {
+      1 => _NONNEGINT,
+      2 => _NONNEGINT,
+    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+  } else {
+    $cx += 0;
+    $cy += 0;
+  }
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+
+  $cx = 0 if $cx < 0;
+  $cy = 0 if $cy < 0;
+
+  my $rv;
+  if ($global->{cursor_x} == -1) {
+    $rv = bytebuf_puts(\$global->{out}, $global->{caps}[TB_CAP_SHOW_CURSOR]);
+    return $rv if $rv != TB_OK;
+  }
+  $rv = send_cursor_if($cx, $cy);
+  return $rv if $rv != TB_OK;
+
+  $global->{cursor_x} = $cx;
+  $global->{cursor_y} = $cy;
+
+  return TB_OK;
+}
+
+sub tb_hide_cursor {   # $int ()
+  @_ == 0 or return TB_ERR;
+  return TB_ERR_NOT_INIT unless $global->{initialized};
+
+  if ($global->{cursor_x} >= 0) {
+    my $rv = bytebuf_puts(\$global->{out}, $global->{caps}[TB_CAP_HIDE_CURSOR]);
+    return $rv if $rv != TB_OK;
+  }
+
+  $global->{cursor_x} = -1;
+  $global->{cursor_y} = -1;
+
+  return TB_OK;
+}
+
+#
+# Set cell contents in the internal back buffer at the specified position
 #
 
 sub tb_set_cell {    # $int ($x, $y, $ch, $fg, $bg)
@@ -1495,11 +1734,13 @@ sub tb_set_cell_ex {    # $int ($x, $y, \@ch, $nch, $fg, $bg)
   }
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
-  my $back = $global->{back} // return TB_ERR;
+  my $back = $global->{back};
+  return TB_ERR unless defined $back;
   return TB_ERR_OUT_OF_BOUNDS unless $back->in_bounds($x, $y);
   return TB_ERR if $nch < 1;
 
-  my $cell = $back->get($x, $y) // return TB_ERR;
+  my $cell = $back->get($x, $y);
+  return TB_ERR unless defined $cell;
   return $cell->set(pack('U*', @$ch), $fg, $bg);
 }
 
@@ -1516,15 +1757,17 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
   return TB_ERR_NOT_INIT unless $global->{initialized};
   return TB_ERR unless TB_OPT_EGC;
 
-  my $back = $global->{back}    // return TB_ERR;
-  my $cell = $back->get($x, $y) // return TB_ERR_OUT_OF_BOUNDS;
-  return TB_ERR if STRICT && ($cell->{ch} // '') eq "\0";
+  my $back = $global->{back};
+  return TB_ERR_OUT_OF_BOUNDS unless $back->in_bounds($x, $y);
+  my $cell = $back->get($x, $y);
+  return TB_ERR unless defined $cell;
+
   $cell->{ch} .= chr($ch);
   return TB_OK;
 }
 
 #
-# Return a reference to the cell at the specified position.
+# Return a reference to the cell at the specified position
 #
 
 sub tb_get_cell {    # $cell ($x, $y, $back, $cell)
@@ -1534,15 +1777,18 @@ sub tb_get_cell {    # $cell ($x, $y, $back, $cell)
       1 => _NONNEGINT,
       2 => _NONNEGINT,
       3 => _BOOL,
-      4 => _INSTANCE,
+      4 => _REF0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   } else {
+    $x += 0;
+    $y += 0;
     $back += 0;
   }
   return TB_ERR_NOT_INIT unless $global->{initialized};
-  my $buffer = $back ? 'back' : 'front';
-  $global->{$buffer} = $cell->get($x, $y) // return TB_ERR_OUT_OF_BOUNDS;
-  return TB_OK;
+  my $buffer = $back ? $global->{back} : $global->{front};
+  return TB_ERR_OUT_OF_BOUNDS unless $buffer->in_bounds($x, $y);
+  $$cell = $buffer->get($x, $y);
+  return defined $$cell ? TB_OK : TB_ERR;
 }
 
 #
@@ -1659,7 +1905,7 @@ sub tb_get_fds {      # $int (\$ttyfd, \$resizefd)
 }
 
 #
-# Print and printf functions.
+# Print and printf functions
 #
 
 sub tb_print {    # $int ($x, $y, $fg, $bg, $str)
@@ -1687,7 +1933,7 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
   my $back = $global->{back};
   return TB_ERR_OUT_OF_BOUNDS unless $back->in_bounds($x, $y);
 
-  $$out_w = 0 if defined($out_w);
+  $$out_w = 0 if defined $out_w;
 
   my $rv;
   my $w;
@@ -1729,13 +1975,14 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
     }
     else {
       if ($back->in_bounds($x, $y)) {
-        my $cell = $back->get($x, $y) // return TB_ERR;
+        my $cell = $back->get($x, $y);
+        return TB_ERR unless defined $cell;
         $rv = $cell->set(chr($uni), $fg, $bg);
         return $rv if $rv != TB_OK;
       }
       $x_prev = $x;
       $x += $w;
-      $$out_w += $w if defined($out_w);
+      $$out_w += $w if defined $out_w;
     }
   }
 
@@ -1752,7 +1999,7 @@ sub tb_printf_ex {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
 }
 
 #
-# Send raw bytes to terminal.
+# Send raw bytes to terminal
 #
 
 sub tb_send {    # $int ($buf, $nbuf)
@@ -1774,7 +2021,7 @@ sub tb_sendf {   # $int ($fmt, @args)
   if (STRICT) {
     check {
       1 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
+    } => { map { $_ => $_[$_-1] } 1 } or return TB_ERR;
   } else {
     $fmt .= '';
   }
@@ -1785,7 +2032,7 @@ sub tb_sendf {   # $int ($fmt, @args)
 }
 
 #
-# Deprecated
+# Set custom callbacks for escape sequence parsing
 #
 
 sub tb_set_func {
@@ -2187,7 +2434,7 @@ sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
 
   if (TB_OPT_LIBC_WCHAR) {
     my $w = wcwidth($ch);
-    $$width = $w if defined($width);
+    $$width = $w if defined $width;
 
     # NUL is not printable even though width is 0.
     return $ch != 0 && $w >= 0 ? 1 : 0;
@@ -2195,16 +2442,16 @@ sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
 
     # Fast path for 1-byte codepoints
     if (($ch >= 0x20 && $ch <= 0x7e) || ($ch >= 0xa0 && $ch <= 0xff)) {
-      $$width = 1 if defined($width);
+      $$width = 1 if defined $width;
       return 1;
     }
     if ($ch <= 0xff) {
-      $$width = ($ch == 0 ? 0 : -1) if defined($width);
+      $$width = ($ch == 0 ? 0 : -1) if defined $width;
       return 0;
     }
 
     my $w = Termbox::PP::WCWidth::wcwidth($ch);
-    $$width = $w if defined($width);
+    $$width = $w if defined $width;
     return $w >= 0 ? 1 : 0;
   }
 }
@@ -2230,7 +2477,7 @@ sub tb_cluster_width {    # $int (\@cluster, $nch)
     elsif ($c >= 0x1f1e6 && $c <= 0x1f1ff) { $ri++ }
 
     my $w = tb_wcwidth($c);
-    $w = -1 unless defined($w);
+    $w = -1 unless defined $w;
     $wmax = $w if $w > $wmax;
   }
 
@@ -2476,8 +2723,7 @@ sub parse_terminfo_caps {    # $int ()
     my $cap = get_terminfo_string($pos_str_offsets, $num_offsets,
       $pos_str_table, $nbytes_strings, $terminfo_cap_indexes->[$i]);
     # Something is not right
-    return TB_ERR 
-      unless defined $cap;
+    return TB_ERR unless defined $cap;
     $global->{caps}->[$i] = $cap;
   }
 
@@ -3291,8 +3537,9 @@ sub cellbuf_get {    # $int ($c, $x, $y, \$out)
       4 => _REF0,
     } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
   }
+  return TB_ERR_OUT_OF_BOUNDS unless $c->in_bounds($x, $y);
   $$out = $c->get($x, $y);
-  return defined($$out) ? TB_OK : TB_ERR_OUT_OF_BOUNDS;
+  return defined $$out ? TB_OK : TB_ERR;
 }
 
 sub cellbuf_in_bounds {    # $int ($c, $x, $y)

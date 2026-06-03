@@ -77,9 +77,9 @@ SKIP: {
     plan tests => 4;
     my $cell = Termbox::Cell->new();
     $cell->set("A\x{0308}", 1, 0);  # A + combining diaeresis
-    my $egc = $cell->egc;
-    is ref($egc), 'ARRAY', 'egc() returns ARRAY ref';
-    is $egc->[0], ord('A'), 'first codepoint in egc';
+    my $ech = $cell->ech;
+    is ref($ech), 'ARRAY', 'ech() returns ARRAY ref';
+    is $ech->[0], ord('A'), 'first codepoint in ech';
     ok $cell->nech >= 1,    'nech() >= 1 for EGC';
     ok $cell->cech >= 1,    'cech() >= 1 for EGC';
   };

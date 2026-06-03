@@ -6,7 +6,7 @@ use Test::More;
 use POSIX ();
 
 if ($^O eq 'MSWin32') {
-  plan skip_all => 'Resize tests are not applicable on Windows'
+  plan skip_all => 'Not available on Windows';
 }
 
 require_ok 'Termbox::PP';

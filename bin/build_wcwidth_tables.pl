@@ -9,7 +9,7 @@
 #   Copyright (c) 2020 José Joaquín Atria <https://github.com/jjatria>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024 J. Schneider
+#   Author: 2024,2026 J. Schneider
 # ------------------------------------------------------------------------
 
 use 5.014;
@@ -22,7 +22,7 @@ use FindBin qw( $Bin );
 use LWP;
 use POSIX;
 
-use constant TARGET => "$Bin/../lib/Termbox/Go/WCWidth/Tables.pm";
+use constant TARGET => "$Bin/../lib/Termbox/PP/WCWidth/Tables.pm";
 
 BEGIN {
   $ENV{PERL_LWP_ENV_PROXY} = 1;
@@ -122,7 +122,7 @@ sub main { # $ ()
   my $content = '';
   open(my $fh, ">", \$content);
   $fh->say(<<HEADER
-package Termbox::Go::WCWidth::Tables;
+package Termbox::PP::WCWidth::Tables;
 use strict;
 use warnings;
 
