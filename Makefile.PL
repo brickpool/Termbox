@@ -35,11 +35,11 @@ WriteMakefile1(
     resources => {
       repository  => {
         type => 'git',
-        url  => 'https://github.com/brickpool/Termbox-Go.git',
-        web  => 'https://github.com/brickpool/Termbox-Go',
+        url  => 'https://github.com/brickpool/Termbox.git',
+        web  => 'https://github.com/brickpool/Termbox',
       },
       bugtracker  => { 
-        web => 'https://github.com/brickpool/Termbox-Go/issues',
+        web => 'https://github.com/brickpool/Termbox/issues',
       },
     },
     prereqs => {

@@ -1,84 +1,101 @@
-Revision history for Termbox::Go
+Revision history for Termbox
+
+0.004001
+        2026-06-03
+        - Tests: stabilize terminfo tests for CI environments
+        - Terminal: fix resize handling (ioctl, SIGWINCH, ESC fallback)
+
+0.004
+        2026-06-03
+        - API: refactor from termbox-go to termbox2 (C API)
+        - API: remove Go API compatibility layer; use termbox2 semantics
+        - Platform: remove Win32 support
+        - Threads: drop threads support/dependency (no longer required)
+        - Build: reduce non-core dependencies (now near-zero)
+        - Compat: adjust behavior to match termbox2.h (events/resize/terminfo paths)
 
 0.003010
         2026-06-02
-        - Tests: remove incorrect skip logic; terminal tests now run reliably on real TTY
-        - Terminal: fix SIGIO crash during shutdown (kernel emitted async I/O signal on fd close)
-        - Terminal: set $SIG{IO} = 'IGNORE' in Close() to align with termbox-go shutdown semantics
-        - Tests: restore stable done_testing; full suite now executes to completion
+        - Tests: remove incorrect skip logic; terminal tests run reliably on real TTY
+        - Terminal: fix SIGIO crash during shutdown (async I/O signal on fd close)
+        - Terminal: ignore SIGIO in Close() to match termbox-go shutdown semantics
+        - Tests: restore stable done_testing; full test suite completes reliably
 
 0.003009
         2026-05-16
-        - fix get_term_size re-adjusted (see also GH #7)
-        - convert terminal tests to headless-capable skip logic for CPAN/CI
-        - add threads dependency in Makefile.PL
+        - Terminal: fix get_term_size re-adjustment (see GH #7)
+        - Tests: convert terminal tests to headless-capable CI skip logic
+        - Build: add threads dependency to Makefile.PL
 
 0.003008
         2026-05-15
-        - fix sync changed cells back into front buffer during Flush (GH #4)
-        - change align UTF-8 decoding behavior in extract_event
+        - Terminal: fix syncing changed cells back into front buffer during Flush (GH #4)
+        - Terminal: adjust UTF-8 decoding behavior in extract_event
 
 0.003007
         2026-05-15
-        - Terminfo: keep Go-like errno flow; clear stale errno before reads
+        - Terminfo: preserve Go-like errno flow; clear stale errno before reads
         - Terminfo: make builtin compatibility matching deterministic
-        - Terminfo: harden binary parse for short reads/EOF; set EIO
-        - Terminal::Backend: align X10 mouse decode to Go Cb/Cx/Cy offsets
-        - Terminal::Backend: extract_raw_event no-op on empty dst buffer
-        - Terminal::Backend: guard flush on zero-byte writes (loop safety)
-        - Terminal::Backend: invalid UTF-8 -> U+FFFD, consume 1 byte
+        - Terminfo: harden binary parsing against short reads and EOF; set EIO
+        - Terminal::Backend: align X10 mouse decoding with Go Cb/Cx/Cy offsets
+        - Terminal::Backend: make extract_raw_event a no-op on empty dst buffer
+        - Terminal::Backend: guard flush against zero-byte writes
+        - Terminal::Backend: replace invalid UTF-8 with U+FFFD and consume one byte
         - Tests: update terminal parse expectations for Go X10 decoding
 
 0.003006
         2026-05-14
-        - fix Win32 tb_peek_event timeout path to map undef to EventNone
-        - fix Init() F_SETOWN handling to use getpid()
-        - fix missing use Import::Into in Termbox::Go
-        - Add timer to the thread's main loop (delete yield)
-        - clean up legacy resize and peek_event tests
-        - note Test2/Test::Builder PID warning noise in ithreads tests
+        - Win32: fix tb_peek_event timeout mapping undef to EventNone
+        - Terminal: fix Init() F_SETOWN handling to use getpid()
+        - Build: fix missing Import::Into dependency
+        - Threads: add timer to main loop (remove yield)
+        - Tests: clean up legacy resize and peek_event tests
+        - Tests: document Test2/Test::Builder PID warning noise in ithreads tests
 
 0.003005
         2026-05-03
-        - fix RGB Background Bug in Terminal
-        - fix get_term_size ioctl buffer and order
-        - fix processing of $inbuf; changed without a lock
-        - Change for Thread::Queue; :shared is not necessary
-        - Update WCWidth tables to 17.0.0
-        - Add threads->yield() to main loop
-        - Add Partial writes in flush
+        - Terminal: fix RGB background rendering bug
+        - Terminal: fix get_term_size ioctl buffer layout and field order
+        - Terminal: fix unsynchronized access to $inbuf
+        - Threads: update Thread::Queue usage; :shared no longer required
+        - Unicode: update WCWidth tables to 17.0.0
+        - Threads: add threads->yield() to main loop
+        - Terminal: handle partial writes during flush
 
 0.003004
         2025-11-02
-        - Change from error codes in Win32
+        - Win32: switch from error codes
 
 0.003003
         2025-05-14
-        - Change Legacy function tb_peek_event for Win32
+        - Win32: change legacy tb_peek_event behavior
 
 0.003002
         2025-04-30
-        - fix SIGIO Windows VT handling
-        - fix padding of EventType in INPUT_RECORD
+        - Win32: fix SIGIO handling for Windows VT
+        - Win32: fix INPUT_RECORD EventType padding
 
 0.003001
         2024-06-17
-        - Encapsulation of the Win32::API imports
-        - fix Terminal Unicode support
+        - Win32: encapsulate Win32::API imports
+        - Terminal: fix Unicode handling
 
-0.003   2024-06-06
-        - Add Windows VT support
-        - bug fixes
+0.003
+        2024-06-06
+        - Terminal: add Windows VT support
+        - Misc: bug fixes
 
-0.002   2024-05-31
-        - Add Terminal support
+0.002
+        2024-05-31
+        - Terminal: add initial terminal support
 
 0.001001
         2024-05-16
-        - Upload to github
-        - Publication of the first release
-        - Improvements and bug fixes
+        - Project: initial GitHub upload
+        - Release: first public version
+        - Misc: improvements and bug fixes
 
-0.001  2024-04-24
-        - First release (Win32 only support)
-        - Add Legacy support
+0.001
+        2024-04-24
+        - Release: first version (Win32-only)
+        - Legacy: add legacy support

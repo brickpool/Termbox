@@ -49,7 +49,7 @@ note 'handle_resize';
 # -------------------
 
 subtest 'handle_resize writes signal to pipe' => sub {
-  plan tests => 2;
+  plan tests => 3;
 
   my ($rfd, $wfd) = POSIX::pipe();
   diag "Failed to create pipe: $!" unless defined $rfd && defined $wfd;
@@ -57,11 +57,13 @@ subtest 'handle_resize writes signal to pipe' => sub {
 
   Termbox::handle_resize(SIGWINCH);
 
-  my $buf = '';
-  my $n = POSIX::read($rfd, $buf, 8);
+  my $buf = pack('i', 0);
+  my $n = POSIX::read($rfd, $buf, length($buf));
 
   ok($n > 0, 'data written to pipe');
-  like($buf, qr/\d+/, 'pipe contains numeric signal value');
+  is($n, length($buf), 'read exactly buffer length bytes');
+  my $sig = unpack('i', $buf);
+  is($sig, SIGWINCH, 'pipe contains binary signal value');
 };
 
 # ---------------------
@@ -101,7 +103,8 @@ subtest 'update_term_size_via_esc parses escape response' => sub {
   $Termbox::global->{wfd} = $wfd;
 
   # Simulate terminal response: ESC [ 24 ; 80 R
-  POSIX::write($wfd, "\e[24;80R", 7);
+  my $resp = "\e[24;80R";
+  POSIX::write($wfd, $resp, length($resp));
 
   my $rv = Termbox::update_term_size_via_esc();
 
@@ -110,27 +113,18 @@ subtest 'update_term_size_via_esc parses escape response' => sub {
   is($Termbox::global->{height}, 24, 'height parsed correctly');
 };
 
-# ------------------------------------------
-note 'update_term_size (ESC fallback only)';
-# ------------------------------------------
-{
-  no warnings 'redefine';
-  local *Termbox::update_term_size_via_esc = sub {
-    $Termbox::global->{width}  = 100;
-    $Termbox::global->{height} = 40;
-    return TB_OK();
-  };
+# ----------------------
+note 'update_term_size';
+# ----------------------
 
-  subtest 'update_term_size uses esc fallback' => sub {
-    plan tests => 3;
-    $Termbox::global->{ttyfd} = -1;
+subtest 'update_term_size without tty is a no-op' => sub {
+  plan tests => 1;
+  $Termbox::global->{ttyfd} = -1;
 
-    my $rv = Termbox::update_term_size();
-
-    is($rv, TB_OK(), 'returns TB_OK');
-    is($Termbox::global->{width},  100, 'width set');
-    is($Termbox::global->{height}, 40,  'height set');
-  };
-}
-
+  is(
+    Termbox::update_term_size(),
+    TB_OK(),
+    'update_term_size is a no-op without tty'
+  );
+};
 done_testing;

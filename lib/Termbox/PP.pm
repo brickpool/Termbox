@@ -2870,8 +2870,8 @@ sub handle_resize {    # void ($sig)
     $sig += 0;
   }
   local $! = $!;
-  my $sig_buf = pack('i', $sig);
-  POSIX::write($global->{resize_pipefd}[1], $sig_buf, length($sig_buf));
+  my $payload = pack('i', $sig);
+  POSIX::write($global->{resize_pipefd}[1], $payload, length($payload));
   return;
 }
 
@@ -2887,7 +2887,7 @@ sub update_term_size {    # $int ()
   my $sz = pack('S4', 0, 0, 0, 0);
 
   # Try ioctl TIOCGWINSZ
-  if (eval { require 'sys/ioctl.ph'; 1 } && ioctl($fh, &TIOCGWINSZ, $sz) == 1) {
+  if (eval { require 'sys/ioctl.ph'; 1 } && ioctl($fh, &TIOCGWINSZ, $sz)) {
     my ($row, $col) = unpack('S4', $sz);
     $global->{width}  = $col;
     $global->{height} = $row;
@@ -2937,9 +2937,10 @@ sub update_term_size_via_esc {    # $int ()
   if ($buf !~ /\e\[(\d+);(\d+)R/) {
     return TB_ERR_RESIZE_SSCANF;
   }
+  my ($rh, $rw) = ($1, $2);
 
-  $global->{width}  = $1;
-  $global->{height} = $2;
+  $global->{width}  = $rw;
+  $global->{height} = $rh;
   return TB_OK;
 }
 
@@ -3070,9 +3071,8 @@ sub wait_event {
     }
 
     if ($resize_has_events) {
-      my $ignore = '';
-      # Drain one resize notification (size is not critical here)
-      POSIX::read($resizefd, $ignore, 4);
+      my $ignore = pack('i', 0);
+      POSIX::read($resizefd, $ignore, length($ignore));
       # TODO: Harden against errors encountered mid-resize
       $rv = update_term_size();
       return $rv if $rv != TB_OK;
