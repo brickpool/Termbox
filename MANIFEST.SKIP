@@ -7,5 +7,4 @@
 \bMYMETA\.
 \bsrc
 \btrial
-\.code-workspace
-\.komodoproject
+.+\.komodoproject

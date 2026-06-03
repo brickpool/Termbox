@@ -1,24 +1,15 @@
 use strict;
 use warnings;
 
-use Config;
 use ExtUtils::MakeMaker;
 
-unless ($Config{useithreads}) { die <<"END";
-************************************************************
-ERROR: This Perl was built *without* thread support.
-
-Termbox::Go requires a threaded Perl (built with -Dusethreads).
-Please install a Perl with thread support and try again.
-************************************************************
-END
-}
+die "OS unsupported\n" if $^O eq 'MSWin32';
 
 WriteMakefile1(
-  NAME              => 'Termbox::Go',
-  VERSION_FROM      => 'lib/Termbox/Go.pm',
-  ABSTRACT_FROM     => 'lib/Termbox/Go.pm',
-  MIN_PERL_VERSION  => '5.014',
+  NAME              => 'Termbox::PP',
+  VERSION_FROM      => 'lib/Termbox/PP.pm',
+  ABSTRACT          => 'Perl port of the termbox2 terminal library',
+  MIN_PERL_VERSION  => '5.010',
   AUTHOR            => 'J. Schneider',
   LICENSE           => 'mit',
   EXE_FILES         => ['bin/build_wcwidth_tables.pl'],
@@ -28,18 +19,12 @@ WriteMakefile1(
   },
 
   PREREQ_PM => {
-    'Devel::StrictMode'               => 0.003,
-    'List::Util'                      => 1.29,      # v5.14 => 1.23
-    'Params::Util'                    => 1.07,
-    'Import::Into'                    => 1.002004,
-    'Thread::Queue'                   => 3.07,      # v5.14 => 2.12
-    'Unicode::EastAsianWidth'         => 0,
-    'Unicode::EastAsianWidth::Detect' => 0,
+    'Devel::StrictMode' => 0.003,
   },
 
   TEST_REQUIRES => {
     'Test::Exception' => 0.31,
-    'Test::Simple'    => 1.302188,
+    'Test::More'      => 1.302188,
   },
 
   META_MERGE => {
@@ -59,38 +44,36 @@ WriteMakefile1(
     },
     prereqs => {
       runtime => {
-        requires => { # v5.14 builtin modules
-          'autodie'         => 0,
-          'bytes'           => 0,
-          'Carp'            => 0,
-          'Encode'          => 0,
-          'English'         => 0,
+        requires => {    # v5.10 builtin modules
+#          'bytes'           => 0,
+          'constant'        => 0,
+#          'Config'          => 0,
           'Exporter'        => 0,
-          'Data::Dumper'    => 0,
           'IO::File'        => 0,
-          'lib'             => 0,
-          'open'            => 0,
-          'Pod::Usage'      => 0,
-          'POSIX'           => 0,
+          'Params::Check'   => 0,
           'Scalar::Util'    => 0,
-          'strict'          => 0,
-          'threads'         => 0,
-          'threads::shared' => 0,
-          'Time::HiRes'     => 0,
-          'version'         => 0,
-          'warnings'        => 0,
+#          'strict'          => 0,
+#          'POSIX'           => 0,
+#          'warnings'        => 0,
+#          'Unicode::UCD'    => 0,
+#          'utf8'            => 0,
+#          'vars'            => 0,
         },
         recommends => {
-          'charnames'     => 0,
-          'Find::Bin'     => 0,
-          'LWP'           => 0,
-          'Pod::Autopod'  => 0,
+          'Getopt::Long'                    => 0,
+          'Encode'                          => 0,
+          'lib'                             => 0,
+          'List::Util'                      => 0,
+          'Pod::Usage'                      => 0,
+          'Time::HiRes'                     => 0,
+          'Unicode::EastAsianWidth::Detect' => 0,
         },
       },
       test => {
-        requires => { # v5.14 builtin modules
-          'Devel::Peek' => 0,
-          'utf8'        => 0,
+        requires => {    # v5.10 builtin modules
+          'Data::Dumper' => 0,
+          'Devel::Peek'  => 0,
+          'File::Temp'   => 0,
         },
       },
     },
@@ -109,13 +92,6 @@ sub WriteMakefile1 { # void (%params)
   my %params = @_;
   my $eumm_version = $ExtUtils::MakeMaker::VERSION;
   $eumm_version = eval $eumm_version;
-
-  if ($^O eq 'MSWin32') {
-    $params{PREREQ_PM}->{'Win32'}           = 0;
-    $params{PREREQ_PM}->{'Win32::Console'}  = 0.10;
-    $params{PREREQ_PM}->{'Win32::API'}      = 0.75;
-    $params{PREREQ_PM}->{'Win32API::File'}  = 0.1201;
-  }
 
   if ($params{TEST_REQUIRES} and $eumm_version < 6.6303) {
       $params{BUILD_REQUIRES}={ %{$params{BUILD_REQUIRES} || {}} , %{$params{TEST_REQUIRES}} };

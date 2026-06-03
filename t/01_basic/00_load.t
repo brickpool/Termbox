@@ -1,11 +1,12 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
 use Test::More;
 
-use_ok 'Termbox::Go::Devel';
-use_ok 'Termbox::Go::Common';
-use_ok 'Termbox::Go::WCWidth::Tables';
-use_ok 'Termbox::Go::WCWidth';
+BEGIN {
+  use_ok 'Termbox::PP::WCWidth';
+  use_ok 'Termbox::PP::WCWidth::Tables';
+}
 
 done_testing;

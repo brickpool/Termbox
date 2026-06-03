@@ -1,9 +1,12 @@
-use 5.014;
+use 5.004;
+use strict;
 use warnings;
 
 use Test::More;
 
-use_ok 'Termbox::Go::Legacy';
-use_ok 'Termbox::Go', qw( TB_IMPL );
+BEGIN {
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox', qw( tb_set_func );
+}
 
 done_testing;

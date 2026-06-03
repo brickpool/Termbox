@@ -1,9 +1,11 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
 use Test::More;
 
-use_ok 'Termbox::Go::Terminfo::Builtin';
-use_ok 'Termbox::Go::Terminfo';
+BEGIN {
+  use_ok 'Termbox::PP::Terminfo::Builtin';
+}
 
 done_testing;

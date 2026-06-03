@@ -1,64 +1,131 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
 use Test::More;
 use Test::Exception;
 
-use_ok 'Termbox::Go::Terminal::Backend', qw( :types );
+BEGIN {
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox', qw( :return :event :keys );
+}
 
-subtest 'input_event' => sub {
-  plan tests => 10;
-  my $type;
-  lives_ok  { $type = input_event() } 'call empty';
-  is_deeply   $type, { data => '', err => 0 }, 'create type';
-  lives_ok  { $type = input_event('a', 1) } 'call params';
-  is_deeply   $type, { data => 'a', err => 1 }, 'create params';
-  lives_ok  { $type = input_event({ data => '', err => 2 }) } 'call hash';
-  is_deeply   $type, { data => '', err => 2 }, 'cast hash';
-  lives_ok  { $type = input_event('a') } 'invalid call';
-  is          $type, undef, 'returns undef';
-  lives_ok  { $type = input_event([], 1) } 'invalid content';
-  is          $type, undef, 'returns undef';
+subtest 'Termbox::Cell->new' => sub {
+  plan tests => 5;
+  my $cell;
+  lives_ok { $cell = Termbox::Cell->new() } 'new() lives';
+  isa_ok    $cell, 'Termbox::Cell',  'returns blessed object';
+  is        $cell->{ch}, '', 'ch defaults to empty string';
+  is        $cell->{fg}, 0,  'fg defaults to 0';
+  is        $cell->{bg}, 0,  'bg defaults to 0';
 };
 
-subtest 'winsize' => sub {
-  plan tests => 10;
-  my $type;
-  lives_ok  { $type = winsize() } 'call empty';
-  is_deeply   $type, { rows=>0, cols=>0, xpixels=>0, ypixels=>0 }, 
-    'create type';
-  lives_ok  { $type = winsize(0, 1, 2, 3) } 'call params';
-  is_deeply   $type, { rows=>0, cols=>1, xpixels=>2, ypixels=>3 }, 
-    'create params';
-  lives_ok  { $type = winsize({ rows=>1, cols=>2, xpixels=>3, ypixels=>4 }) } 
-    'call hash';
-  is_deeply   $type, { rows=>1, cols=>2, xpixels=>3, ypixels=>4 }, 'cast hash';
-  lives_ok  { $type = winsize(0) } 'invalid call';
-  is          $type, undef, 'returns undef';
-  lives_ok  { $type = winsize('', 1, 2, 3) } 'invalid content';
-  is          $type, undef, 'returns undef';
+subtest 'Termbox::Cell::set and accessors' => sub {
+  plan tests => 8;
+  my $cell = Termbox::Cell->new();
+  my $rv;
+  lives_ok { $rv = $cell->set('A', 3, 5) } 'set() lives';
+  is $rv,         TB_OK(), 'set returns TB_OK';
+  is $cell->{ch}, 'A',     'ch stored as UTF-8 string';
+  is $cell->{fg}, 3,       'fg stored';
+  is $cell->{bg}, 5,       'bg stored';
+  is $cell->ch,   ord('A'), 'ch() returns codepoint';
+  is $cell->fg,   3,        'fg() accessor';
+  is $cell->bg,   5,        'bg() accessor';
 };
 
-subtest 'syscall_Termios' => sub {
+subtest 'Termbox::Cell::set empty ch' => sub {
+  plan tests => 2;
+  my $cell = Termbox::Cell->new();
+  $cell->set('X', 1, 2);
+  is $cell->set('', 0, 0), TB_OK(), 'empty ch accepted';
+  is $cell->{ch}, "\0",             'ch set to "\0" for empty string';
+};
+
+subtest 'Termbox::Cell::equal' => sub {
+  plan tests => 4;
+  my $a = Termbox::Cell->new();
+  my $b = Termbox::Cell->new();
+  $a->set('X', 9, 1);
+  $b->set('X', 9, 1);
+  is $a->equal($b), 1, 'identical cells are equal';
+  $b->set('Y', 9, 1);
+  is $a->equal($b), 0, 'different ch: not equal';
+  $b->set('X', 8, 1);
+  is $a->equal($b), 0, 'different fg: not equal';
+  $b->set('X', 9, 2);
+  is $a->equal($b), 0, 'different bg: not equal';
+};
+
+subtest 'Termbox::Cell::copy' => sub {
+  plan tests => 5;
+  my $src = Termbox::Cell->new();
+  my $dst = Termbox::Cell->new();
+  $src->set('M', 5, 3);
+  my $rv;
+  lives_ok { $rv = $dst->copy($src) } 'copy() lives';
+  is $rv,          TB_OK(), 'copy returns TB_OK';
+  is $dst->{ch},   'M',     'ch copied';
+  is $dst->{fg},   5,       'fg copied';
+  is $dst->{bg},   3,       'bg copied';
+};
+
+SKIP: {
+  skip 'TB_OPT_EGC not enabled', 4 unless Termbox::TB_OPT_EGC();
+
+  subtest 'Termbox::Cell EGC accessors' => sub {
+    plan tests => 4;
+    my $cell = Termbox::Cell->new();
+    $cell->set("A\x{0308}", 1, 0);  # A + combining diaeresis
+    my $ech = $cell->ech;
+    is ref($ech), 'ARRAY', 'ech() returns ARRAY ref';
+    is $ech->[0], ord('A'), 'first codepoint in ech';
+    ok $cell->nech >= 1,    'nech() >= 1 for EGC';
+    ok $cell->cech >= 1,    'cech() >= 1 for EGC';
+  };
+}
+
+subtest 'Termbox::Event->new' => sub {
   plan tests => 10;
-  my $type;
-  lives_ok  { $type = syscall_Termios() } 'call empty';
-  # We don't want to compare the Cc arrayref, so reset it to an empty arrayref
-  $type->{Cc} = [];
-  is_deeply   $type, { Iflag=>0, Oflag=>0, Cflag=>0, Lflag=>0, Cc=>[], 
-    Ispeed=>0, Ospeed=>0 }, 'create type';
-  lives_ok  { $type = syscall_Termios(0, 1, 2, 3, [], 4, 5) } 'call params';
-  is_deeply   $type, { Iflag=>0, Oflag=>1, Cflag=>2, Lflag=>3, Cc=>[], 
-    Ispeed=>4, Ospeed=>5 }, 'create params';
-  lives_ok  { $type = syscall_Termios({ Iflag=>1, Oflag=>2, Cflag=>3, 
-    Lflag=>4, Cc=>[], Ispeed=>5, Ospeed=>6 }) } 'call hash';
-  is_deeply   $type, { Iflag=>1, Oflag=>2, Cflag=>3, 
-    Lflag=>4, Cc=>[], Ispeed=>5, Ospeed=>6 }, 'cast hash';
-  lives_ok  { $type = syscall_Termios(0) } 'invalid call';
-  is          $type, undef, 'returns undef';
-  lives_ok  { $type = syscall_Termios(0, 1, 2, 3, {}, 4, 5) } 
-    'invalid content';
-  is          $type, undef, 'returns undef';
+  my $ev;
+  lives_ok { $ev = Termbox::Event->new() } 'new() lives';
+  isa_ok    $ev, 'Termbox::Event', 'returns blessed object';
+  is $ev->{type}, 0, 'type defaults to 0';
+  is $ev->{mod},  0, 'mod defaults to 0';
+  is $ev->{key},  0, 'key defaults to 0';
+  is $ev->{ch},   0, 'ch defaults to 0';
+  is $ev->{w},    0, 'w defaults to 0';
+  is $ev->{h},    0, 'h defaults to 0';
+  is $ev->{x},    0, 'x defaults to 0';
+  is $ev->{y},    0, 'y defaults to 0';
+};
+
+subtest 'Termbox::Event accessors' => sub {
+  plan tests => 8;
+  my $ev = Termbox::Event->new();
+  $ev->{type} = TB_EVENT_KEY;
+  $ev->{mod}  = TB_MOD_CTRL;
+  $ev->{key}  = TB_KEY_ENTER;
+  $ev->{ch}   = ord('a');
+  $ev->{w}    = 80;
+  $ev->{h}    = 24;
+  $ev->{x}    = 10;
+  $ev->{y}    = 5;
+  is $ev->type, TB_EVENT_KEY,  'type() accessor';
+  is $ev->mod,  TB_MOD_CTRL,   'mod() accessor';
+  is $ev->key,  TB_KEY_ENTER,  'key() accessor';
+  is $ev->ch,   ord('a'),      'ch() accessor';
+  is $ev->w,    80,            'w() accessor';
+  is $ev->h,    24,            'h() accessor';
+  is $ev->x,    10,            'x() accessor';
+  is $ev->y,    5,             'y() accessor';
+};
+
+subtest 'Termbox::Event type constants' => sub {
+  plan tests => 3;
+  is TB_EVENT_KEY,    1, 'TB_EVENT_KEY == 1';
+  is TB_EVENT_RESIZE, 2, 'TB_EVENT_RESIZE == 2';
+  is TB_EVENT_MOUSE,  3, 'TB_EVENT_MOUSE == 3';
 };
 
 done_testing;

@@ -1,17 +1,17 @@
-=head1 Termbox::Go
+=head1 Termbox::PP
 
-B<Termbox::Go> is a Perl module that provides a minimalistic API and enables 
+B<Termbox::PP> is a Perl module that provides a minimalistic API and enables 
 Perl programmers to create text-based user interfaces.
 
 Here are three outstanding advantages:
 
 =over
 
-=item 1 B<Cross-platform compatibility> 
+=item 1 B<Pure Perl>
 
-The library is cross-platform, providing both terminal-based implementations 
-on I<*nix> operating systems and a WinAPI-based console implementation for 
-Windows operating systems.
+The library is implemented in pure Perl and does not require any XS or C code. 
+This makes it very portable and easy to install on any I<*nix> operating system 
+with a Perl interpreter.
 
 =item 2 B<Abstraction of functions> 
 
@@ -27,14 +27,14 @@ makes termbox a unique library.
 
 =head2 Warning
 
-This port of termbox-go is still quite new and still has to prove itself in 
+This port of termbox2 is still quite new and still has to prove itself in 
 production use and possibly be improved.
 
 =head2 Install
 
-To install the B<Termbox::Go> module type the following:
+To install the B<Termbox::PP> module type the following:
 
-  cpan Termbox::Go
+  cpan Termbox::PP
 
 Manual install:
 
@@ -44,34 +44,15 @@ Manual install:
 
 =head2 Dependencies
 
-B<Termbox::Go> mainly needs Core modules of Perl >= 
-L<v5.14|http://metacpan.org/release/DAPM/perl-5.14.4>, but also 
-requires these modules:
+B<Termbox::PP> mainly needs Core modules of Perl >= 
+L<v5.10|http://metacpan.org/release/DAPM/perl-5.10.1> and these modules for
+development and testing:
 
 =over
 
 =item * L<Devel::StrictMode>
 
-=item * L<Params::Util> 
-
-=item * L<Import::Into>
-
-=item * L<Unicode::EastAsianWidth>
-
-=item * L<Unicode::EastAsianWidth::Detect>
-
-=back
-
-If the module is used under Windows, some standard Win32 libraries (which are 
-delivered with your Perl distribution) are required:
-
-=over
-
-=item * L<Win32::Console> 
-
-=item * L<Win32::API>
-
-=item * L<Win32API::File> 
+=item * L<Test::Exception>  (only for testing)
 
 =back
 
@@ -84,7 +65,7 @@ directory. You can try them out via:
 
 =head1 Credits
 
-B<Termbox::Go> is a port of L<termbox-go|https://github.com/nsf/termbox-go>.
+B<Termbox::PP> is a port of L<termbox2|https://github.com/termbox/termbox2>.
 
 =head2 Author
 
@@ -98,7 +79,7 @@ B<Termbox::Go> is a port of L<termbox-go|https://github.com/nsf/termbox-go>.
 
 =over
 
-=item * Copyright (c) 2012 by termbox-go authors
+=item * Copyright (c) 2021 by termbox developers
 
 =item * MIT License
 

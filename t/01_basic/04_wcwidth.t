@@ -1,23 +1,36 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
+use utf8;
 
 use Test::More;
 # use Test::More::UTF8 qw( failure out );
-use utf8;
-binmode Test::More->builder->failure_output(), ':utf8';
-binmode Test::More->builder->output(), ':utf8';
+binmode( Test::More->builder->failure_output(), ':utf8');
+binmode( Test::More->builder->output(), ':utf8');
 
-use_ok 'Termbox::Go::WCWidth', qw( wcwidth wcswidth );
+use constant TB_OPT_LIBC_WCHAR => exists $ENV{TB_OPT_LIBC_WCHAR} 
+                                ? $ENV{TB_OPT_LIBC_WCHAR} 
+                                : 1;
+
+BEGIN {
+  if (TB_OPT_LIBC_WCHAR) {
+    require_ok 'Termbox::PP';
+    use_ok 'Termbox';
+  } else {
+    use_ok 'Termbox::PP::WCWidth';
+  }
+}
+
+*wcwidth = TB_OPT_LIBC_WCHAR 
+         ? \&Termbox::wcwidth 
+         : \&Termbox::PP::WCWidth::wcwidth;
 
 sub assert_length {
   my ($str, $each, $phrase, $msg) = @_;
   $msg ||= "wcwidth test";
   my @actual_each = map { wcwidth(ord $_) } split(//, $str);
-  my $actual_phrase = wcswidth($str);
   is_deeply \@actual_each, $each,
     "$msg: $str expects @$each and gets @actual_each";
-  is $actual_phrase, $phrase,
-    "$msg: $str expects $phrase and gets $actual_phrase";
 }
 
 assert_length("コンニチハ, セカイ!",

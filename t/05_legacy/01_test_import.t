@@ -1,20 +1,28 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
 use Test::More;
 
-use_ok 'Termbox::Go', qw( TB_IMPL );
+BEGIN {
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox', qw( :api :func :event :color );
+}
 
-ok exists(&tb_init),            ':api';
-ok exists(&TB_VERSION_STR),     ':const';
-ok exists(&TB_KEY_CTRL_TILDE),  ':keys';
-ok exists(&TB_DEFAULT),         ':color';
-ok exists(&TB_BOLD),            ':attr';
-ok exists(&TB_EVENT_KEY),       ':event';
-ok exists(&TB_MOD_ALT),         ':mode';
-ok exists(&TB_INPUT_CURRENT),   ':input';
-ok exists(&TB_OUTPUT_CURRENT),  ':output';
-ok exists(&tb_cells),           ':types';
-ok exists(&TB_OK),              ':return';
+ok exists(&tb_set_func),              ':api';
+ok exists(&tb_cell_buffer),           ':api';
+ok exists(&TB_FUNC_EXTRACT_PRE),      ':func';
+ok exists(&TB_FUNC_EXTRACT_POST),     ':func';
+if (Termbox::TB_OPT_ATTR_W == 16) {
+  ok exists(&TB_256_BLACK),           ':color';
+} else {
+  ok exists(&TB_TRUECOLOR_BOLD),      ':color';
+  ok exists(&TB_TRUECOLOR_UNDERLINE), ':color';
+  ok exists(&TB_TRUECOLOR_REVERSE),   ':color';
+  ok exists(&TB_TRUECOLOR_ITALIC),    ':color';
+  ok exists(&TB_TRUECOLOR_BLINK),     ':color';
+  ok exists(&TB_TRUECOLOR_BLACK),     ':color';
+}
+ok exists(&Termbox::TB_OPT_TRUECOLOR), 'TB_OPT_TRUECOLOR';
 
 done_testing;

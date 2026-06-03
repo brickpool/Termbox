@@ -1,9 +1,12 @@
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
 use Test::More;
 
-use_ok 'Termbox::Go::Terminal::Backend';
-use_ok 'Termbox::Go::Terminal';
+BEGIN {
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox';
+}
 
 done_testing;
