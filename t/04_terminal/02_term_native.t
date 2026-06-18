@@ -17,34 +17,34 @@ BEGIN {
 note 'Character printability checking';
 # -------------------------------------
 
-subtest 'tb_iswprint_ex - printable ASCII characters' => sub {
+subtest 'tb_iswprint - printable ASCII characters' => sub {
   plan tests => 5;
   
   # Test printable ASCII characters
-  ok( Termbox::tb_iswprint_ex(ord('A')), 'Character A is printable' );
-  ok( Termbox::tb_iswprint_ex(ord('z')), 'Character z is printable' );
-  ok( Termbox::tb_iswprint_ex(ord('0')), 'Character 0 is printable' );
-  ok( Termbox::tb_iswprint_ex(ord(' ')), 'Character space is printable' );
-  ok( Termbox::tb_iswprint_ex(ord('!')), 'Character ! is printable' );
+  ok( Termbox::tb_iswprint(ord('A')), 'Character A is printable' );
+  ok( Termbox::tb_iswprint(ord('z')), 'Character z is printable' );
+  ok( Termbox::tb_iswprint(ord('0')), 'Character 0 is printable' );
+  ok( Termbox::tb_iswprint(ord(' ')), 'Character space is printable' );
+  ok( Termbox::tb_iswprint(ord('!')), 'Character ! is printable' );
 };
 
-subtest 'tb_iswprint_ex - control characters' => sub {
+subtest 'tb_iswprint - control characters' => sub {
   plan tests => 4;
   
   # Test control characters (not printable)
-  ok( !Termbox::tb_iswprint_ex(0x00), 'NULL character is not printable' );
-  ok( !Termbox::tb_iswprint_ex(0x01), 'SOH character is not printable' );
-  ok( !Termbox::tb_iswprint_ex(0x07), 'BEL character is not printable' );
-  ok( !Termbox::tb_iswprint_ex(0x1F), 'Unit separator is not printable' );
+  ok( !Termbox::tb_iswprint(0x00), 'NULL character is not printable' );
+  ok( !Termbox::tb_iswprint(0x01), 'SOH character is not printable' );
+  ok( !Termbox::tb_iswprint(0x07), 'BEL character is not printable' );
+  ok( !Termbox::tb_iswprint(0x1F), 'Unit separator is not printable' );
 };
 
-subtest 'tb_iswprint_ex - extended Unicode' => sub {
+subtest 'tb_iswprint - extended Unicode' => sub {
   plan tests => 3;
   
   # Test extended Unicode characters
-  ok( Termbox::tb_iswprint_ex(0x00E9), 'Character é (U+00E9) is printable' );
-  ok( Termbox::tb_iswprint_ex(0x4E2D), 'Character 中 (U+4E2D) is printable' );
-  ok( Termbox::tb_iswprint_ex(0x1F600), 'Emoji 😀 (U+1F600) is printable' );
+  ok( Termbox::tb_iswprint(0x00E9), 'Character é (U+00E9) is printable' );
+  ok( Termbox::tb_iswprint(0x4E2D), 'Character 中 (U+4E2D) is printable' );
+  ok( Termbox::tb_iswprint(0x1F600), 'Emoji 😀 (U+1F600) is printable' );
 };
 
 # ----------------------------------------

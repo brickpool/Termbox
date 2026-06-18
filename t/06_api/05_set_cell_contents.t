@@ -56,7 +56,7 @@ subtest 'set-cell APIs after init' => sub {
   plan skip_all => 'init_cellbuf failed in this environment'
     if $rv != TB_OK();
 
-  plan tests => 8;
+  plan tests => 9;
 
   $rv = tb_set_cell(0, 0, ord('A'), 0, 0);
   is($rv, TB_OK(), 'tb_set_cell writes one codepoint');
@@ -81,7 +81,9 @@ subtest 'set-cell APIs after init' => sub {
   );
 
   $rv = tb_set_cell_ex(0, 0, [], 0, 0, 0);
-  is($rv, TB_ERR(), 'tb_set_cell_ex rejects empty cluster after init');
+  is($rv, TB_OK(), 'tb_set_cell_ex accept empty cluster');
+  is($cells->[0]->{ch}, "\0", 
+    'tb_set_cell_ex with empty cluster sets cell to null character');
   {
     local $SIG{__WARN__} = sub { };
     is(Termbox::tb_deinit(), TB_OK(), 'tb_deinit succeeds');

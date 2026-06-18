@@ -47,8 +47,9 @@ subtest 'tb_set_func sets extract callbacks' => sub {
   );
 
   # invalid fn_type
+  my $rv = eval { tb_set_func(-1, sub { }) } // TB_ERR();
   is(
-    tb_set_func(-1, sub { }),
+    $rv,
     TB_ERR(),
     'invalid fn_type returns TB_ERR'
   );

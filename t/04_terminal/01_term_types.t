@@ -3,11 +3,20 @@ use strict;
 use warnings;
 
 use Test::More;
-use Test::Exception;
 
 BEGIN {
   require_ok 'Termbox::PP';
   use_ok 'Termbox', qw( :return :event :keys );
+}
+
+sub lives_ok (&$) {
+  my ($code, $name) = @_;
+  my $error;
+  my $ok = eval { $code->(); 1 };
+  $error = $@;
+  ok($ok, $name);
+  diag("Died with: $error") unless $ok;
+  return $ok;
 }
 
 subtest 'Termbox::Cell->new' => sub {

@@ -42,10 +42,10 @@ subtest 'Terminfo get_terminfo_* with mocked data' => sub {
     'get_terminfo_string returns "baz" for index 2'
   );
   is(
-    Termbox::get_terminfo_string(0, 3, INT16_SIZE * 3 + length($strtab), 
-      OUT_OF_BOUNDS), 
-    undef, 
-    'get_terminfo_string returns undef for out-of-bounds offset'
+    Termbox::get_terminfo_string(0, 3, INT16_SIZE * 3, length($strtab), 
+      OUT_OF_BOUNDS),
+    '', 
+    'get_terminfo_string returns empty str for out-of-bounds offset'
   );
 
   # get_terminfo_int16 expects: ($offset, \$val)

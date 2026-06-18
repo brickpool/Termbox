@@ -2,13 +2,28 @@ use 5.010;
 use warnings;
 
 use Test::More;
-use Test::Exception;
 
 use Data::Dumper;
-use Devel::StrictMode;
+
+use constant STRICT => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
+  PERL_STRICT
+  EXTENDED_TESTING
+  AUTHOR_TESTING
+  RELEASE_TESTING
+);
 
 BEGIN {
   use_ok 'Termbox::PP';
+}
+
+sub lives_ok (&$) {
+  my ($code, $name) = @_;
+  my $error;
+  my $ok = eval { $code->(); 1 };
+  $error = $@;
+  ok($ok, $name);
+  diag("Died with: $error") unless $ok;
+  return $ok;
 }
 
 my $buf;

@@ -4,8 +4,8 @@
 #
 #   Implementation based on termbox2 v2.7.0-dev, 8. Feb 2026
 #
-#   Copyright (C) 2010-2020 nsf <no.smile.face@gmail.com>
-#                 2015-2026 Adam Saponara <as@php.net>
+#   Copyright (C) 2015-2026 Adam Saponara <as@php.net>
+#                 2010-2020 nsf <no.smile.face@gmail.com>
 #
 # ------------------------------------------------------------------------
 #   Author: 2024,2026 J. Schneider
@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.4.0');
+our $VERSION = version->declare('v0.4.2');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -35,8 +35,10 @@ our $AUTHORITY = 'github:brickpool';
 # ------------------------------------------------------------------------
 
 require bytes;
+use Carp ();
 use Config;
 use IO::File ();
+use Params::Check qw( check );
 use POSIX qw(
   :errno_h
   :termios_h
@@ -47,17 +49,52 @@ use Scalar::Util qw(
 );
 use utf8;
 
-use Devel::StrictMode;
-
 # ------------------------------------------------------------------------
 # Compile-time options ---------------------------------------------------
 # ------------------------------------------------------------------------
 
-# These constants are defined as functions before the 'Exporter' section to 
-# allow for conditional tagged exports.
-
 # use constant TB_VERSION_STR => $version->normal;
 BEGIN { sub TB_VERSION_STR () { state $qv = $version->normal } }
+
+# STRICT is a global flag that enables strict argument checking.
+use constant STRICT => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
+  PERL_STRICT
+  EXTENDED_TESTING
+  AUTHOR_TESTING
+  RELEASE_TESTING
+);
+
+# The following compile-time options are available for conditional code. 
+# They are set to the default values used in the C implementation, but can be 
+# overridden by setting the corresponding environment variables before loading 
+# this module.
+
+use constant TB_OPT_EGC => exists $ENV{TB_OPT_EGC} ? !!$ENV{TB_OPT_EGC} : 1;
+
+# Define this to set the string length used in 'tb_printf' and 'tb_sendf'.
+use constant TB_OPT_PRINTF_BUF => exists $ENV{TB_OPT_PRINTF_BUF} 
+  ? 0+$ENV{TB_OPT_PRINTF_BUF} 
+  : 4096;
+
+# Define this to set the size of the buffer used when reading from the tty.
+use constant TB_OPT_READ_BUF => exists $ENV{TB_OPT_READ_BUF} 
+  ? 0+$ENV{TB_OPT_READ_BUF} 
+  : 64;
+
+# In this port, TB_OPT_LIBC_WCHAR selects the Unicode::UCD-based wcwidth backend
+use constant TB_OPT_LIBC_WCHAR => exists $ENV{TB_OPT_LIBC_WCHAR} 
+  ? !!$ENV{TB_OPT_LIBC_WCHAR}
+  : 1;
+
+use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? $ENV{PATH_MAX} : 4096;
+
+use constant TB_TERMINFO_DIR => exists $ENV{TB_TERMINFO_DIR} 
+  ? ''.$ENV{TB_TERMINFO_DIR}
+  : undef;
+
+use constant TB_RESIZE_FALLBACK_MS => exists $ENV{TB_RESIZE_FALLBACK_MS} 
+  ? 0+$ENV{TB_RESIZE_FALLBACK_MS}
+  : 1000;
 
 # Deprecated. Back-compat for old flag.
 use constant TB_OPT_TRUECOLOR => exists $ENV{TB_OPT_TRUECOLOR} 
@@ -364,39 +401,7 @@ our %EXPORT_TAGS = (
 # Constants --------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-# The following compile-time options are available for conditional code. 
-# They are set to the default values used in the C implementation, but can be 
-# overridden by setting the corresponding environment variables before loading 
-# this module.
-
 use constant INT16_SIZE => $Config{shortsize};
-
-use constant TB_OPT_EGC => exists $ENV{TB_OPT_EGC} ? !!$ENV{TB_OPT_EGC} : 1;
-
-# Define this to set the string length used in 'tb_printf' and 'tb_sendf'.
-use constant TB_OPT_PRINTF_BUF => exists $ENV{TB_OPT_PRINTF_BUF} 
-  ? 0+$ENV{TB_OPT_PRINTF_BUF} 
-  : 4096;
-
-# Define this to set the size of the buffer used when reading from the tty.
-use constant TB_OPT_READ_BUF => exists $ENV{TB_OPT_READ_BUF} 
-  ? 0+$ENV{TB_OPT_READ_BUF} 
-  : 64;
-
-# In this port, TB_OPT_LIBC_WCHAR selects the Unicode::UCD-based wcwidth backend
-use constant TB_OPT_LIBC_WCHAR => exists $ENV{TB_OPT_LIBC_WCHAR} 
-  ? !!$ENV{TB_OPT_LIBC_WCHAR}
-  : 1;
-
-use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? $ENV{PATH_MAX} : 4096;
-
-use constant TB_TERMINFO_DIR => exists $ENV{TB_TERMINFO_DIR} 
-  ? ''.$ENV{TB_TERMINFO_DIR}
-  : undef;
-
-use constant TB_RESIZE_FALLBACK_MS => exists $ENV{TB_RESIZE_FALLBACK_MS} 
-  ? 0+$ENV{TB_RESIZE_FALLBACK_MS}
-  : 1000;
 
 # ASCII key constants ($tb_event->key)
 use constant {
@@ -775,38 +780,100 @@ my $clone = sub {    # $clone ()
 # Params Check -----------------------------------------------------------
 # ------------------------------------------------------------------------
 
+# This sub is a wrapper around Params::Check::check that provides positional 
+# argument checking. It returns a coderef that can be used to check the 
+# arguments of a function. The coderef will return the original arguments if 
+# they pass the checks, or will die with an error message if they fail.
+# See Type::Params::compile for the inspiration for this function.
+sub compile {
+  return sub { @_ } unless STRICT;
+
+  unless (@_) {
+    return sub {
+      Carp::croak "Expected no arguments" if @_;
+      return @_;
+    };
+  }
+
+  my %tmpl;
+  @tmpl{1 .. @_} = @_;
+
+  return sub {
+    my %in;
+    @in{1 .. @_} = @_;
+
+    local $Params::Check::STRIP_LEADING_DASHES = 0;
+    local $Params::Check::PRESERVE_CASE        = 1;
+    local $Params::Check::CALLER_DEPTH
+      = $Params::Check::CALLER_DEPTH + 1;
+
+    Params::Check::check(\%tmpl, \%in, 0) or do {
+      local $_ = Params::Check::last_error();
+      s/\bKey '(\d+)'/Argument #$1/g;
+      Carp::croak $_;
+    };
+
+    return @_;
+  };
+}
+
+# Types::Standard like templates for Params::Check. 
 use constant {
-  _ANY        => { required => 1, defined => 0 },
-  _STRING     => { required => 1, defined => 1, allow => qr/.+/ },
-  _STRING0    => { required => 1, defined => 1, default => '', 
-                   strict_type => 1 },
-  _CLASS      => { required => 1, defined => 1, allow => qr/\A\w+(::\w+)*\z/ },
-  _POSINT     => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
-  _NONNEGINT  => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
-  _INT        => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
-  _BOOL       => { required => 1, default => 0, allow => qr/\A[01]?\z/ },
-  _REF0       => { required => 1, allow => \&CORE::ref },
-  _SCALAR0    => { required => 1, defined => 1, default => \undef, 
-                   strict_type => 1 },
-  _ARRAY0     => { required => 1, defined => 1, default => [], 
-                   strict_type => 1 },
-  _CODE       => { required => 1, defined => 1, default => sub { }, 
-                   strict_type => 1 },
-  _INSTANCE   => { required => 1, allow => \&blessed },
+  _Bool      => { required => 1, allow => qr/\A[01]?\z/ },
+  _Str       => { 
+    required => 1, 
+    defined => 1, default => '', strict_type => 1
+  },
+  _Int       => { required => 1, defined => 1, allow => qr/\A[-]?\d+\z/ },
+  _ClassName => { required => 1, defined => 1, allow => qr/\A\w+(::\w+)*\z/ },
+  _Ref       => { 
+    required => 1, 
+    allow => ($] >= 5.016) ? \&CORE::ref : sub { ref($_[0]) }
+  },
+  _ScalarRef => {
+    required => 1, defined => 1, default => \undef, 
+    strict_type => 1 
+  },
+  _ArrayRef => { required => 1, defined => 1, default => [], strict_type => 1 },
+  _CodeRef  => { 
+    required => 1, defined => 1, default => sub { }, 
+    strict_type => 1
+  },
+  _Object   => { required => 1, allow => \&blessed },
 };
 
-BEGIN { if (STRICT) {
-  no warnings 'once';
-  require Params::Check;
-  *check = sub ($$) {
-    local $Params::Check::SANITY_CHECK_TEMPLATE = 1;
-    local $Params::Check::NO_DUPLICATES         = 1;
-    local $Params::Check::ALLOW_UNKNOWN         = 0;
-    return Params::Check::check(@_);
+sub Maybe ($) {
+  my ($aref) = @_;
+
+  Carp::croak("Maybe['a] expects exactly one template hashref")
+    unless ref($aref) eq 'ARRAY' && @$aref == 1 && ref($aref->[0]) eq 'HASH';
+
+  my ($t) = @$aref;
+  my %u = %$t;
+
+  my $allow       = delete $u{allow};
+  my $strict_type = delete $u{strict_type};
+  my $default     = $u{default};
+
+  $u{defined} = 0;
+  $u{allow} = sub {
+    my ($v) = @_;
+    return 1 unless defined $v;
+    return 0 if $strict_type && ref($v) ne ref($default);
+    return 1 unless defined $allow;
+    return Params::Check::allow(
+      $v,
+      ref($allow) eq 'ARRAY' ? $allow : [ $allow ],
+    );
   };
-} else {
-  *check = sub ($$) { 1 };
-}}
+  return \%u;
+}
+
+# Types::Common::Numeric like templates for Params::Check. 
+use constant {
+  _PositiveInt => { required => 1, defined => 1, allow => qr/\A[1-9]\d*\z/ },
+  _PositiveOrZeroInt => { required => 1, defined => 1, allow => qr/\A\d+\z/ },
+};
 
 # ------------------------------------------------------------------------
 # Helper classes ---------------------------------------------------------
@@ -817,12 +884,10 @@ BEGIN { if (STRICT) {
 #
 
 sub Termbox::Cell::new {    # $cell ()
-  my ($class) = @_;
-  if (STRICT) {
-    check {
-      1 => _CLASS,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
-  }
+  state $sig = compile(
+    _ClassName,
+  );
+  my ($class) = $sig->(@_);
   return bless { 
     ch   => '',   # UFT8 string
     fg   => 0,    # bitwise foreground attributes
@@ -841,7 +906,8 @@ if (TB_OPT_EGC) {
   };
   *Termbox::Cell::nech = sub {
     my $ch = $_[0]->{ch};
-    $ch =~ /\X/ ? (length($ch) > 1 ? length($ch) : 0) : 0;
+    my $n = length($ch);
+    return ($ch =~ /\A\X\z/ && $n > 1) ? $n : 0;
   };
   *Termbox::Cell::cech = sub {
     my $ech = $_[0]->ech;
@@ -850,18 +916,14 @@ if (TB_OPT_EGC) {
 }
 
 sub Termbox::Cell::set {    # $int ($ch, $fg, $bg)
-  my ($cell, $ch, $fg, $bg) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _STRING0,
-      3 => _NONNEGINT,
-      4 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $fg += 0;
-    $bg += 0;
-  }
+  state $sig = compile(
+    _Object,
+    _Str,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($cell, $ch, $fg, $bg) = $sig->(@_);
+
   $ch = "\0" unless length($ch);
   $cell->{ch} = TB_OPT_EGC ? $ch : substr($ch, 0, 1);
   $cell->{fg} = $fg;
@@ -870,13 +932,11 @@ sub Termbox::Cell::set {    # $int ($ch, $fg, $bg)
 }
 
 sub Termbox::Cell::equal {    # $bool ($other)
-  my ($a, $b) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  }
+  state $sig = compile(
+    _Object,
+    _Object,
+  );
+  my ($a, $b) = $sig->(@_);
   return 0
     if !(ref $a && ref $b)
     || $a->{ch} ne $b->{ch}
@@ -886,13 +946,11 @@ sub Termbox::Cell::equal {    # $bool ($other)
 }
 
 sub Termbox::Cell::copy {    # $int ($src)
-  my ($dst, $src) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+    _Object,
+  );
+  my ($dst, $src) = $sig->(@_);
   %$dst = %$src;
   return TB_OK;
 }
@@ -902,12 +960,10 @@ sub Termbox::Cell::copy {    # $int ($src)
 #
 
 sub Termbox::Event::new {    # $event ()
-  my ($class) = @_;
-  if (STRICT) {
-    check {
-      1 => _CLASS,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
-  }
+  state $sig = compile(
+    _ClassName,
+  );
+  my ($class) = $sig->(@_);
   return bless {
     type => 0,    # one of 'TB_EVENT_*' constants
     mod  => 0,    # bitwise 'TB_MOD_*' constants
@@ -935,12 +991,10 @@ sub Termbox::Event::y     { $_[0]->{y}    }
 #
 
 sub cellbuf::new {    # $cellbuf ()
-  my ($class) = @_;
-  if (STRICT) {
-    check {
-      1 => _CLASS,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
-  }
+  state $sig = compile(
+    _ClassName,
+  );
+  my ($class) = $sig->(@_);
   return bless {
     width  => 0,
     height => 0,
@@ -949,14 +1003,12 @@ sub cellbuf::new {    # $cellbuf ()
 };
 
 sub cellbuf::init {    # $int ($width, $height)
-  my ($c, $w, $h) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _POSINT,
-      3 => _POSINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+    _PositiveInt,
+    _PositiveInt,
+  );
+  my ($c, $w, $h) = $sig->(@_);
   $c->{width}  = $w;
   $c->{height} = $h;
   $c->{cells}  = [ map { Termbox::Cell->new() } 0 .. $w*$h-1 ];
@@ -964,12 +1016,10 @@ sub cellbuf::init {    # $int ($width, $height)
 }
 
 sub cellbuf::clear {    # $int ()
-  my ($c) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($c) = $sig->(@_);
   my $rv;
   for my $i (0 .. $c->{width}*$c->{height}-1) {
     return $rv if $rv = $c->{cells}[$i]->set(' ', $global->{fg}, $global->{bg});
@@ -978,26 +1028,22 @@ sub cellbuf::clear {    # $int ()
 }
 
 sub cellbuf::get {    # $cell ($x, $y)
-  my ($c, $x, $y) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _NONNEGINT,
-      3 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
-  }
+  state $sig = compile(
+    _Object,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($c, $x, $y) = $sig->(@_);
   return $c->{cells}[ $x + $y * $c->{width} ];
 }
 
 sub cellbuf::in_bounds {    # $bool ($x, $y)
-  my ($c, $x, $y) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _NONNEGINT,
-      3 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  }
+  state $sig = compile(
+    _Object,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($c, $x, $y) = $sig->(@_);
   if ($x < 0 || $x >= $c->{width} || $y < 0 || $y >= $c->{height}) {
     return 0;
   }
@@ -1005,14 +1051,12 @@ sub cellbuf::in_bounds {    # $bool ($x, $y)
 }
 
 sub cellbuf::resize {     # $int ($width, $height)
-  my ($c, $w, $h) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _POSINT,
-      3 => _POSINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+    _PositiveInt,
+    _PositiveInt,
+  );
+  my ($c, $w, $h) = $sig->(@_);
   my $rv;
 
   my $ow = $c->{width};
@@ -1056,12 +1100,10 @@ sub cellbuf::resize {     # $int ($width, $height)
 #
 
 sub captrie::new {    # $captrie ()
-  my ($class) = @_;
-  if (STRICT) {
-    check {
-      1 => _CLASS,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
-  }
+  state $sig = compile(
+    _ClassName,
+  );
+  my ($class) = $sig->(@_);
   return bless {
     exact      => {},
     prefixes   => {},
@@ -1070,12 +1112,10 @@ sub captrie::new {    # $captrie ()
 }
 
 sub captrie::clear {    # $int ()
-  my ($self) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($self) = $sig->(@_);
   $self->{exact}     = {};
   $self->{prefixes}  = {};
   $self->{alt}       = undef;
@@ -1083,12 +1123,10 @@ sub captrie::clear {    # $int ()
 }
 
 sub captrie::rebuild_alt {    # $int ()
-  my ($self) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($self) = $sig->(@_);
   my @ordered = sort {
        length($b) <=> length($a)
     || $a cmp $b
@@ -1098,25 +1136,21 @@ sub captrie::rebuild_alt {    # $int ()
 }
 
 sub captrie::has_prefix {    # $bool ($s)
-  my ($self, $s) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _STRING,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  }
+  state $sig = compile(
+    _Object,
+    _Str,
+  );
+  my ($self, $s) = $sig->(@_);
   return 0 unless length($s);
   return exists $self->{prefixes}{$s} ? 1 : 0;
 }
 
 sub captrie::best_match {    # $s|undef ($buf)
-  my ($self, $buf) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _STRING,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return undef;
-  }
+  state $sig = compile(
+    _Object,
+    _Str,
+  );
+  my ($self, $buf) = $sig->(@_);
   return undef unless length($buf);
   my $alt = $self->{alt};
   return undef unless defined $alt;
@@ -1125,15 +1159,13 @@ sub captrie::best_match {    # $s|undef ($buf)
 }
 
 sub captrie::add {    # $int ($cap, $key, $mod)
-  my ($self, $cap, $key, $mod) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _STRING,
-      3 => _NONNEGINT,
-      4 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+    _Str,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($self, $cap, $key, $mod) = $sig->(@_);
   # Nothing to do for empty caps
   return TB_OK unless length($cap);
   return TB_ERR_CAP_COLLISION if exists $self->{exact}{$cap};
@@ -1152,18 +1184,13 @@ sub captrie::add {    # $int ($cap, $key, $mod)
 }
 
 sub captrie::find {    # $int ($buf, \$last, \$depth)
-  my ($self, $buf, $last, $depth) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _STRING0,
-      3 => _REF0,
-      4 => _REF0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $buf .= '';
-  }
-
+  state $sig = compile(
+    _Object,
+    _Str,
+    _Ref,
+    _Ref,
+  );
+  my ($self, $buf, $last, $depth) = $sig->(@_);
   my $node = {
     is_leaf   => 0,
     key       => 0,
@@ -1432,19 +1459,16 @@ sub bytebuf_free;
 #
 
 sub tb_init {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return tb_init_file('/dev/tty');
 }
 
 sub tb_init_file {    # $int ($path)
-  my ($path) = @_;
-  if (STRICT) {
-    check {
-      1 => _STRING,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $path .= '';
-  }
+  state $sig = compile(
+    _Str,
+  );
+  my ($path) =$sig->(@_);
   return TB_ERR_INIT_ALREADY if $global->{initialized};
 
   my $ttyfd = POSIX::open($path, POSIX::O_RDWR);
@@ -1458,28 +1482,19 @@ sub tb_init_file {    # $int ($path)
 }
 
 sub tb_init_fd {    # $int ($ttyfd)
-  my ($ttyfd) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $ttyfd += 0;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+  );
+  my ($ttyfd) = $sig->(@_);
   return tb_init_rwfd($ttyfd, $ttyfd);
 }
 
 sub tb_init_rwfd {    # $int ($rfd, $wfd)
-  my ($rfd, $wfd) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $rfd += 0;
-    $wfd += 0;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($rfd, $wfd) = $sig->(@_);
 
   tb_reset();
   $global->{ttyfd} =
@@ -1509,7 +1524,8 @@ sub tb_init_rwfd {    # $int ($rfd, $wfd)
 }
 
 sub tb_shutdown {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   tb_deinit();
   return TB_OK;
@@ -1520,13 +1536,15 @@ sub tb_shutdown {    # $int ()
 #
 
 sub tb_width {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   return $global->{width};
 }
 
 sub tb_height {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   return $global->{height};
 }
@@ -1536,22 +1554,18 @@ sub tb_height {    # $int ()
 #
 
 sub tb_clear {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   return cellbuf_clear($global->{back});
 }
 
 sub tb_set_clear_attrs {    # $int ($fg, $bg)
-  my ($fg, $bg) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $fg += 0;
-    $bg += 0;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($fg, $bg) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   $global->{fg} = $fg;
   $global->{bg} = $bg;
@@ -1563,7 +1577,8 @@ sub tb_set_clear_attrs {    # $int ($fg, $bg)
 #
 
 sub tb_present {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
   my $rv;
@@ -1576,15 +1591,16 @@ sub tb_present {    # $int ()
   my ($x, $y, $i);
   for ($y = 0; $y < $global->{front}{height}; $y++) {
     for ($x = 0; $x < $global->{front}{width}; ) {
-      return TB_ERR_OUT_OF_BOUNDS unless $global->{back}->in_bounds($x, $y);
-
-      my $back  = $global->{back}->get($x, $y);
-      return TB_ERR unless defined $back;
-      my $front = $global->{front}->get($x, $y);
-      return TB_ERR unless defined $front;
+      my ($back, $front);
+      $rv = cellbuf_get($global->{back}, $x, $y, \$back);
+      return $rv if $rv != TB_OK;
+      $rv = cellbuf_get($global->{front}, $x, $y, \$front);
+      return $rv if $rv != TB_OK;
 
       my $w;
-      if (TB_OPT_EGC && $back->{ch} =~ /\X/) {
+      if (TB_OPT_EGC and
+        $back->{ch} =~ /\A\X\z/ && length($back->{ch}) > 1
+      ) {
         my $ech = [ unpack 'U*', $back->{ch} ];
         $w = tb_cluster_width($ech, scalar @$ech);
       } else {
@@ -1602,7 +1618,9 @@ sub tb_present {    # $int ()
             send_char($i, $y, ord(' '));
           }
         } else {
-          if (TB_OPT_EGC && $back->{ch} =~ /\X/) {
+          if (TB_OPT_EGC and
+            $back->{ch} =~ /\A\X\z/ && length($back->{ch}) > 1
+          ) {
             my $ech = [ unpack 'U*', $back->{ch} ];
             send_cluster($x, $y, $ech, scalar @$ech);
           } else {
@@ -1616,10 +1634,9 @@ sub tb_present {    # $int ()
           # char, we'll get a cell_cmp diff for the skipped cells
           # and properly re-render.
           for ($i = 1; $i < $w; $i++) {
-            return TB_ERR_OUT_OF_BOUNDS 
-              unless $global->{front}->in_bounds($x + $i, $y);
-            my $front_wide = $global->{front}->get($x + $i, $y);
-            return TB_ERR unless defined $front_wide;
+            my $front_wide;
+            $rv = cellbuf_get($global->{front}, $x + $i, $y, \$front_wide);
+            return $rv if $rv != TB_OK;
             my $invalid = "\x{fffd}";
             $rv = $front_wide->set($invalid, -1, -1);
             return $rv if $rv != TB_OK;
@@ -1643,7 +1660,8 @@ sub tb_present {    # $int ()
 #
 
 sub tb_invalidate {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   my $rv = resize_cellbufs();
   return $rv if $rv != TB_OK;
@@ -1655,16 +1673,11 @@ sub tb_invalidate {    # $int ()
 #
 
 sub tb_set_cursor {    # $int ($cx, $cy)
-  my ($cx, $cy) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $cx += 0;
-    $cy += 0;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($cx, $cy) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
   $cx = 0 if $cx < 0;
@@ -1685,7 +1698,8 @@ sub tb_set_cursor {    # $int ($cx, $cy)
 }
 
 sub tb_hide_cursor {   # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
   if ($global->{cursor_x} >= 0) {
@@ -1704,64 +1718,51 @@ sub tb_hide_cursor {   # $int ()
 #
 
 sub tb_set_cell {    # $int ($x, $y, $ch, $fg, $bg)
-  my ($x, $y, $ch, $fg, $bg) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-      3 => _NONNEGINT,
-      4 => _NONNEGINT,
-      5 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($x, $y, $ch, $fg, $bg) = $sig->(@_);
   return tb_set_cell_ex($x, $y, [$ch], 1, $fg, $bg);
 }
 
 sub tb_set_cell_ex {    # $int ($x, $y, \@ch, $nch, $fg, $bg)
-  my ($x, $y, $ch, $nch, $fg, $bg) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-      3 => _ARRAY0,
-      4 => _NONNEGINT,
-      5 => _NONNEGINT,
-      6 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-    return TB_ERR if @$ch != $nch;
-  } else {
-    warn if @$ch != $nch;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _ArrayRef,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($x, $y, $ch, $nch, $fg, $bg) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
-
-  my $back = $global->{back};
-  return TB_ERR unless defined $back;
-  return TB_ERR_OUT_OF_BOUNDS unless $back->in_bounds($x, $y);
-  return TB_ERR if $nch < 1;
-
-  my $cell = $back->get($x, $y);
-  return TB_ERR unless defined $cell;
-  return $cell->set(pack('U*', @$ch), $fg, $bg);
+  my $rv;
+  my $cell;
+  $rv = cellbuf_get($global->{back}, $x, $y, \$cell);
+  return $rv if $rv != TB_OK;
+  $rv = cell_set($cell, $ch, $nch, $fg, $bg);
+  return $rv if $rv != TB_OK;
+  return TB_OK;
 }
 
 sub tb_extend_cell {    # $int ($x, $y, $ch)
-  my ($x, $y, $ch) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-      3 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
-
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($x, $y, $ch) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   return TB_ERR unless TB_OPT_EGC;
-
-  my $back = $global->{back};
-  return TB_ERR_OUT_OF_BOUNDS unless $back->in_bounds($x, $y);
-  my $cell = $back->get($x, $y);
-  return TB_ERR unless defined $cell;
-
+  # TODO: iswprint ch?
+  my $rv;
+  my $cell;
+  $rv = cellbuf_get($global->{back}, $x, $y, \$cell);
+  return $rv if $rv != TB_OK;
   $cell->{ch} .= chr($ch);
   return TB_OK;
 }
@@ -1771,24 +1772,15 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
 #
 
 sub tb_get_cell {    # $cell ($x, $y, $back, $cell)
-  my ($x, $y, $back, $cell) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-      3 => _BOOL,
-      4 => _REF0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $x += 0;
-    $y += 0;
-    $back += 0;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _Bool,
+    _Ref,
+  );
+  my ($x, $y, $back, $cell) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
-  my $buffer = $back ? $global->{back} : $global->{front};
-  return TB_ERR_OUT_OF_BOUNDS unless $buffer->in_bounds($x, $y);
-  $$cell = $buffer->get($x, $y);
-  return defined $$cell ? TB_OK : TB_ERR;
+  return cellbuf_get($back ? $global->{back} : $global->{front}, $x, $y, $cell);
 }
 
 #
@@ -1796,12 +1788,10 @@ sub tb_get_cell {    # $cell ($x, $y, $back, $cell)
 #
 
 sub tb_set_input_mode {    # $int ($mode)
-  my ($mode) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+  );
+  my ($mode) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
   if ($mode == TB_INPUT_CURRENT) {
@@ -1830,12 +1820,10 @@ sub tb_set_input_mode {    # $int ($mode)
 }
 
 sub tb_set_output_mode {    # $int ($mode)
-  my ($mode) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+  );
+  my ($mode) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   switch: for ($mode) {
     case: TB_OUTPUT_CURRENT == $_ and 
@@ -1860,26 +1848,20 @@ sub tb_set_output_mode {    # $int ($mode)
 #
 
 sub tb_peek_event {   # $int ($event, $timeout_ms)
-  my ($event, $timeout_ms) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _INT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $timeout_ms += 0;
-  }
+  state $sig = compile(
+    _Object,
+    _Int,
+  );
+  my ($event, $timeout_ms) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   return wait_event($event, $timeout_ms);
 }
 
 sub tb_poll_event {   # $int ($event)
-  my ($event) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($event) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
   return wait_event($event, -1);
 }
@@ -1889,13 +1871,11 @@ sub tb_poll_event {   # $int ($event)
 #
 
 sub tb_get_fds {      # $int (\$ttyfd, \$resizefd)
-  my ($ttyfd, $resizefd) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _SCALAR0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _ScalarRef,
+  );
+  my ($ttyfd, $resizefd) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
   $$ttyfd    = $global->{rfd};
@@ -1909,24 +1889,27 @@ sub tb_get_fds {      # $int (\$ttyfd, \$resizefd)
 #
 
 sub tb_print {    # $int ($x, $y, $fg, $bg, $str)
-  my ($x, $y, $fg, $bg, $str) = @_;
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _Str,
+  );
+  my ($x, $y, $fg, $bg, $str) = $sig->(@_);
   return tb_print_ex($x, $y, $fg, $bg, undef, $str);
 }
 
 sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
-  my ($x, $y, $fg, $bg, $out_w, $str) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-      3 => _NONNEGINT,
-      4 => _NONNEGINT,
-      5 => _ANY,
-      6 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $str .= '';
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    Maybe[_ScalarRef],
+    _Str,
+  );
+  my ($x, $y, $fg, $bg, $out_w, $str) = $sig->(@_);
 
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
@@ -1975,9 +1958,7 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
     }
     else {
       if ($back->in_bounds($x, $y)) {
-        my $cell = $back->get($x, $y);
-        return TB_ERR unless defined $cell;
-        $rv = $cell->set(chr($uni), $fg, $bg);
+        $rv = tb_set_cell($x, $y, $uni, $fg, $bg);
         return $rv if $rv != TB_OK;
       }
       $x_prev = $x;
@@ -1990,7 +1971,14 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
 }
 
 sub tb_printf {    # $int ($x, $y, $fg, $bg, $fmt, @args)
-  my ($x, $y, $fg, $bg, $fmt, @args) = @_;
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _Str,
+  );
+  my ($x, $y, $fg, $bg, $fmt, @args) = ($sig->(@_[0..4]), @_[5..$#_]);
   return tb_print_ex($x, $y, $fg, $bg, undef, $fmt, @args);
 }
 
@@ -2003,28 +1991,19 @@ sub tb_printf_ex {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
 #
 
 sub tb_send {    # $int ($buf, $nbuf)
-  my ($buf, $nbuf) = @_;
-  if (STRICT) {
-    check {
-      1 => _STRING,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $buf .= '';
-    $nbuf += 0;
-  }
+  state $sig = compile(
+    _Str,
+    _PositiveOrZeroInt,
+  );
+  my ($buf, $nbuf) = $sig->(@_);
   return bytebuf_nputs(\$global->{outbuf}, $buf, $nbuf);
 }
 
 sub tb_sendf {   # $int ($fmt, @args)
-  my ($fmt, @args) = @_;
-  if (STRICT) {
-    check {
-      1 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1 } or return TB_ERR;
-  } else {
-    $fmt .= '';
-  }
+  state $sig = compile(
+    _Str,
+  );
+  my ($fmt, @args) = ($sig->(shift), @_);
   my $buf = @args ? sprintf($fmt, @args) : $fmt;
   my $len = bytes::length($buf);
   return TB_ERR if $len >= TB_OPT_PRINTF_BUF;
@@ -2036,21 +2015,15 @@ sub tb_sendf {   # $int ($fmt, @args)
 #
 
 sub tb_set_func {
-  my ($fn_type, $fn) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _CODE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $fn_type += 0;
-    ref $fn or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _CodeRef,
+  );
+  my ($fn_type, $fn) = $sig->(@_);
+
   state $warned = 0;
-  unless ($warned) {
-    warn "tb_set_func() is deprecated and may be removed in a future release\n";
-    $warned = 1;
-  }
+  warn "tb_set_func() is deprecated and may be removed in a future release\n" 
+    unless $warned++;
 
   switch: for ($fn_type) {
     case: TB_FUNC_EXTRACT_PRE == $_ and do {
@@ -2072,14 +2045,10 @@ sub tb_set_func {
 #
 
 sub tb_utf8_char_length {    # $length ($c)
-  my ($c) = @_;
-  if (STRICT) {
-    check {
-      1 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  } else {
-    $c .= '';
-  }
+  state $sig = compile(
+    _Str,
+  );
+  my ($c) = $sig->(@_);
   return 0 if $c eq '';
   $c = bytes::substr($c, 0, 1);
   state $utf8_length = {};
@@ -2096,15 +2065,11 @@ sub tb_utf8_char_length {    # $length ($c)
 }
 
 sub tb_utf8_char_to_unicode {    # $length (\$out, $c)
-  my ($out, $c) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  } else {
-    $c .= '';
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _Str,
+  );
+  my ($out, $c) = $sig->(@_);
   use bytes;
 
   return 0 if $c eq '';
@@ -2132,15 +2097,11 @@ sub tb_utf8_char_to_unicode {    # $length (\$out, $c)
 }
 
 sub tb_utf8_unicode_to_char {    # $length (\$out, $c)
-  my ($out, $c) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  } else {
-    $c += 0;
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _PositiveOrZeroInt,
+  );
+  my ($out, $c) = $sig->(@_);
 
   # Fast path for real Unicode scalar values (<= 0x10FFFF)
   if ($c <= 0x10FFFF) {
@@ -2176,17 +2137,16 @@ sub tb_utf8_unicode_to_char {    # $length (\$out, $c)
 #
 
 sub tb_last_errno {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   return 0+ $global->{last_errno};
 }
 
 sub tb_strerror {    # $str ($err)
-  my ($err) = @_;
-  if (STRICT) {
-    check {
-      1 => _INT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Int,
+  );
+  my ($err) = $sig->(@_);
   switch: for (int($err)) {
     case: TB_OK == $_ and do {
       return "Success"
@@ -2246,14 +2206,13 @@ sub tb_strerror {    # $str ($err)
 }
 
 sub tb_cell_buffer {    # \@ ()
-  return undef if @_;
+  state $sig = compile();
+  $sig->(@_);
 
   state $warned = 0;
-  unless ($warned) {
-    warn "tb_cell_buffer() is deprecated; ".
-      "use tb_get_cell() and related APIs instead\n";
-    $warned = 1;
-  }
+  warn "tb_cell_buffer() is deprecated; ".
+       "use tb_get_cell() and related APIs instead\n"
+    unless $warned++;
 
   my $back = $global->{back};
   return [] unless ref($back) eq 'cellbuf' && ref($back->{cells}) eq 'ARRAY';
@@ -2261,38 +2220,42 @@ sub tb_cell_buffer {    # \@ ()
 }
 
 sub tb_has_truecolor {    # $int ()
+  state $sig = compile();
+  $sig->(@_);
   return TB_OPT_ATTR_W >= 32 ? 1 : 0;
 }
 
 sub tb_has_egc {    # $int ()
+  state $sig = compile();
+  $sig->(@_);
   return TB_OPT_EGC ? 1 : 0;
 }
 
 sub tb_attr_width {    # $int ()
+  state $sig = compile();
+  $sig->(@_);
   return TB_OPT_ATTR_W;
 }
 
 sub tb_version {    # $str ()
+  state $sig = compile();
+  $sig->(@_);
   return TB_VERSION_STR;
 }
 
 sub tb_iswprint {    # $int ($codepoint)
-  my ($codepoint) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+  );
+  my ($codepoint) = $sig->(@_);
   return tb_iswprint_ex($codepoint, undef);
 }
 
 sub tb_wcwidth {    # $int ($codepoint)
-  my ($codepoint) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+  );
+  my ($codepoint) = $sig->(@_);
   if (TB_OPT_LIBC_WCHAR) {
     return wcwidth($codepoint);
   } else {
@@ -2309,7 +2272,8 @@ sub tb_wcwidth {    # $int ($codepoint)
 #
 
 sub tb_reset {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
 
   # Keep tty ownership flag, reset everything else like termbox2.
   my $ttyfd_open = $global->{ttyfd_open} // -1;
@@ -2360,17 +2324,15 @@ sub tb_reset {    # $int ()
 }
 
 sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
-  my ($x, $y, $fg, $bg, $out_w, $fmt, @args) = @_;
-  if (STRICT) {
-    check {
-      1 => _INT,
-      2 => _INT,
-      3 => _NONNEGINT,
-      4 => _NONNEGINT,
-      5 => _SCALAR0,
-      6 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..6 } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    Maybe[_ScalarRef],
+    _Str,
+  );
+  my ($x, $y, $fg, $bg, $out_w, $fmt, @args) = ($sig->(@_[0..5]), @_[6..$#_]);
 
   my $str = @args ? sprintf($fmt, @args) : $fmt;
   return TB_ERR 
@@ -2381,7 +2343,8 @@ sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
 }
 
 sub tb_deinit {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
 
   if (defined($global->{caps}[0]) && $global->{wfd} >= 0) {
     bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_SHOW_CURSOR]);
@@ -2424,13 +2387,11 @@ sub tb_deinit {    # $int ()
 }
 
 sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
-  my ($ch, $width) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => { required => 0, default => \undef, strict_type => 1 },
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return 0;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    Maybe[_ScalarRef],
+  );
+  my ($ch, $width) = $sig->(@_);
 
   if (TB_OPT_LIBC_WCHAR) {
     my $w = wcwidth($ch);
@@ -2457,14 +2418,11 @@ sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
 }
 
 sub tb_cluster_width {    # $int (\@cluster, $nch)
-  my ($cluster, $nch) = @_;
-  if (STRICT) {
-    check {
-      1 => _ARRAY0,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
-    return -1 if $nch != @$cluster;
-  }
+  state $sig = compile(
+    _ArrayRef,
+    _PositiveOrZeroInt,
+  );
+  my ($cluster, $nch) = $sig->(@_);
   
   my $wmax = -1;
   my ($vs15, $vs16, $ri, $zwj) = (0, 0, 0, 0);
@@ -2494,7 +2452,8 @@ sub tb_cluster_width {    # $int (\@cluster, $nch)
 #
 
 sub init_term_attrs {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
 
   return TB_OK if $global->{ttyfd} < 0;
 
@@ -2521,7 +2480,8 @@ sub init_term_attrs {    # $int ()
 }
 
 sub init_term_caps {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   if (load_terminfo() == TB_OK) {
     return parse_terminfo_caps();
   }
@@ -2533,7 +2493,8 @@ sub init_term_caps {    # $int ()
 #
 
 sub load_terminfo {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
 
   my $rv;
 
@@ -2598,16 +2559,11 @@ sub load_terminfo {    # $int ()
 }
 
 sub load_terminfo_from_path {    # $int ($path, $term)
-  my ($path, $term) = @_;
-  if (STRICT) {
-    check {
-      1 => _STRING0,
-      2 => _STRING,
-    } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
-  } else {
-    $path .= '';
-    $term .= '';
-  }
+  state $sig = compile(
+    _Str,
+    _Str,
+  );
+  my ($path, $term) = $sig->(@_);
   my $rv;
   my $tmp;
 
@@ -2630,14 +2586,10 @@ sub load_terminfo_from_path {    # $int ($path, $term)
 }
 
 sub read_terminfo_path {    # $int ($path)
-  my ($path) = @_;
-  if (STRICT) {
-    check {
-      1 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..1 } or return TB_ERR;
-  } else {
-    $path .= '';
-  }
+  state $sig = compile(
+    _Str,
+  );
+  my ($path) = $sig->(@_);
 
   open(my $fp, '<:raw', $path)
     or return TB_ERR;
@@ -2665,7 +2617,8 @@ sub read_terminfo_path {    # $int ($path)
 }
 
 sub parse_terminfo_caps {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
 
   my $terminfo = $global->{terminfo};
   my $nterminfo = length($terminfo) // 0;
@@ -2731,7 +2684,8 @@ sub parse_terminfo_caps {    # $int ()
 }
 
 sub load_builtin_caps {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   my $term = $ENV{"TERM"};
 
   return TB_ERR_NO_TERM unless $term;
@@ -2768,16 +2722,14 @@ sub load_builtin_caps {    # $int ()
 }
 
 sub get_terminfo_string {    # $str|undef ($offsets_pos, $offsets_len, $table_pos, $table_size, $index)
-  my ($offsets_pos, $offsets_len, $table_pos, $table_size, $index) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-      3 => _NONNEGINT,
-      4 => _NONNEGINT,
-      5 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..5 } or return undef;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($offsets_pos, $offsets_len, $table_pos, $table_size, $index) = $sig->(@_);
 
   if ($index >= $offsets_len) {
     # An index beyond the offset table indicates absent
@@ -2813,13 +2765,11 @@ sub get_terminfo_string {    # $str|undef ($offsets_pos, $offsets_len, $table_po
 }
 
 sub get_terminfo_int16 {    # $int ($offset, \$val)
-  my ($offset, $val) = @_;
-  if (STRICT) {
-    check {
-      1 => _INT,
-      2 => _SCALAR0,
-    } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Int,
+    _ScalarRef,
+  );
+  my ($offset, $val) = $sig->(@_);
   if ($offset < 0 || $offset + INT16_SIZE > length($global->{terminfo})) {
     $$val = -1;
     return TB_ERR;
@@ -2833,7 +2783,8 @@ sub get_terminfo_int16 {    # $int ($offset, \$val)
 #
 
 sub init_resize_handler {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   my ($rfd, $wfd);
   unless (($rfd, $wfd) = POSIX::pipe()) {
     $global->{last_errno} = 0+ $!;
@@ -2847,7 +2798,8 @@ sub init_resize_handler {    # $int ()
 }
 
 sub resize_cellbufs {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   my $rv;
   $rv = cellbuf_resize($global->{back}, $global->{width}, $global->{height});
   return $rv if $rv != TB_OK;
@@ -2861,22 +2813,19 @@ sub resize_cellbufs {    # $int ()
 }
 
 sub handle_resize {    # void ($sig)
-  my ($sig) = @_;
-  if (STRICT) {
-    check {
-      1 => _INT,
-    } => { map { $_ => $_[$_-1] } 1..1 } or return;
-  } else {
-    $sig += 0;
-  }
+  state $sig = compile(
+    _Int,
+  );
+  my ($signo) = $sig->(@_);
   local $! = $!;
-  my $payload = pack('i', $sig);
+  my $payload = pack('i', $signo);
   POSIX::write($global->{resize_pipefd}[1], $payload, length($payload));
   return;
 }
 
 sub update_term_size {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   my ($rv, $ioctl_errno);
 
   return TB_OK if $global->{ttyfd} < 0;
@@ -2904,7 +2853,8 @@ sub update_term_size {    # $int ()
 }
 
 sub update_term_size_via_esc {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
 
   my $move_and_report = "\e[9999;9999H\e[6n";
 
@@ -2949,6 +2899,9 @@ sub update_term_size_via_esc {    # $int ()
 #
 
 sub init_cap_trie {    # $int ()
+  state $sig = compile();
+  $sig->(@_);
+
   my $trie = $global->{cap_trie} //= captrie->new();
   my $rv = $trie->clear();
   return $rv if $rv != TB_OK;
@@ -2987,7 +2940,12 @@ sub init_cap_trie {    # $int ()
 
 # Regex/prefix equivalent of termbox2's cap_trie_add.
 sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
-  my ($cap, $key, $mod) = @_;
+  state $sig = compile(
+    Maybe[_Str],
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($cap, $key, $mod) = $sig->(@_);
   my $trie = $global->{cap_trie} or return TB_ERR;
   return $trie->add($cap, $key, $mod);
 }
@@ -2995,14 +2953,22 @@ sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
 # Regex/prefix equivalent of termbox2's cap_trie_find.
 # Returns a hash-ref node in $$last with {is_leaf,key,mod,nchildren,cap}.
 sub cap_trie_find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
-  my ($buf, $nbuf, $last, $depth) = @_;
+  state $sig = compile(
+    Maybe[_Str],
+    _PositiveOrZeroInt,
+    _ScalarRef,
+    _ScalarRef,
+  );
+  my ($buf, $nbuf, $last, $depth) = $sig->(@_);
   my $trie = $global->{cap_trie} or return TB_ERR;
   return $trie->find($buf, $last, $depth);    # Perl does not need nbuf
 }
 
-sub cap_trie_deinit {    # $int ($node|undef)
-  my ($node) = @_;
-  return TB_OK unless $node;
+sub cap_trie_deinit {    # $int ($node)
+  state $sig = compile(
+    _Object,
+  );
+  my ($node) = $sig->(@_);
   return $node->clear();
 }
 
@@ -3011,15 +2977,11 @@ sub cap_trie_deinit {    # $int ($node|undef)
 #
 
 sub wait_event {
-  my ($event, $timeout) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _INT,
-    } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
-  } else {
-    $timeout += 0;
-  }
+  state $sig = compile(
+    _Object,
+    _Int,
+  );
+  my ($event, $timeout) = $sig->(@_);
 
   my $rv;
   my $buf = '';
@@ -3097,12 +3059,10 @@ sub wait_event {
 }
 
 sub extract_event {   # $int ($event)
-  my ($event) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($event) = $sig->(@_);
   my $trie = $global->{cap_trie};
   alias: for my $in ($global->{inbuf}) {
 
@@ -3161,12 +3121,10 @@ sub extract_event {   # $int ($event)
 }
 
 sub extract_esc {    # $int ($event)
-  my ($event) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($event) = $sig->(@_);
 
   my $rv;
 
@@ -3186,13 +3144,11 @@ sub extract_esc {    # $int ($event)
 }
 
 sub extract_esc_user {    # $int ($event, $is_post)
-  my ($event, $is_post) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _BOOL,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+    _Bool,
+  );
+  my ($event, $is_post) = $sig->(@_);
 
   my $fn = $is_post ? $global->{fn_extract_esc_post}
                     : $global->{fn_extract_esc_pre};
@@ -3210,12 +3166,10 @@ sub extract_esc_user {    # $int ($event, $is_post)
 }
 
 sub extract_esc_mouse {    # $int ($event)
-  my ($event) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($event) = $sig->(@_);
 
   use bytes;
   alias: for my $in ($global->{inbuf}) {
@@ -3391,12 +3345,10 @@ sub extract_esc_mouse {    # $int ($event)
 }
 
 sub extract_esc_cap {
-  my ($event) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($event) = $sig->(@_);
   my $trie = $global->{cap_trie};
   alias: for my $in ($global->{inbuf}) {
   my $node;
@@ -3428,7 +3380,12 @@ sub extract_esc_cap {
 #
 
 sub cell_cmp {    # $int ($a, $b)
-  return Termbox::Cell::equal(@_) ? 0 : 1;
+  state $sig = compile(
+    _Object,
+    _Object,
+  );
+  my ($a, $b) = $sig->(@_);
+  return $a->equal($b) ? 0 : 1;
 }
 
 sub cell_copy {    # $int ($dst, $src)
@@ -3436,42 +3393,31 @@ sub cell_copy {    # $int ($dst, $src)
 }
 
 sub cell_set {    # $int ($cell, $ch, $nch, $fg, $bg)
-  my ($cell, $ch, $nch, $fg, $bg) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _ARRAY0,
-      3 => _NONNEGINT,
-      4 => _NONNEGINT,
-      5 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-    return TB_ERR if @$ch != $nch;
-  } else {
-    ref $ch eq 'ARRAY' or return TB_ERR;
-    $fg += 0;
-    $bg += 0;
-  }
+  state $sig = compile(
+    _Object,
+    _ArrayRef,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($cell, $ch, $nch, $fg, $bg) = $sig->(@_);
   return $cell->set(pack('U*', @$ch), $fg, $bg);
 }
 
 sub cell_reserve_ech {    # $int ($cell, $n)
-  my ($cell, $n) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+    _PositiveOrZeroInt,
+  );
+  my ($cell, $n) = $sig->(@_);
   return TB_OPT_EGC ? TB_OK : TB_ERR;
 }
 
 sub cell_free {    # $int ($cell)
-  my ($cell) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($cell) = $sig->(@_);
   $cell->{ch} = "\0";
   $cell->{fg} = 0;
   $cell->{bg} = 0;
@@ -3483,7 +3429,8 @@ sub cell_free {    # $int ($cell)
 #
 
 sub init_cellbuf {    # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   my $rv;
 
   $global->{back}  ||= cellbuf->new();
@@ -3506,12 +3453,10 @@ sub cellbuf_init {    # $int ($c, $w, $h)
 }
 
 sub cellbuf_free {    # $int ($c)
-  my ($c) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+  );
+  my ($c) = $sig->(@_);
   for my $cell (@{ $c->{cells} || [] }) {
     my $rv = cell_free($cell);
     return $rv if $rv != TB_OK;
@@ -3528,15 +3473,13 @@ sub cellbuf_clear {    # $int ($c)
 }
 
 sub cellbuf_get {    # $int ($c, $x, $y, \$out)
-  my ($c, $x, $y, $out) = @_;
-  if (STRICT) {
-    check {
-      1 => _INSTANCE,
-      2 => _NONNEGINT,
-      3 => _NONNEGINT,
-      4 => _REF0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Object,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _Ref,
+  );
+  my ($c, $x, $y, $out) = $sig->(@_);
   return TB_ERR_OUT_OF_BOUNDS unless $c->in_bounds($x, $y);
   $$out = $c->get($x, $y);
   return defined $$out ? TB_OK : TB_ERR;
@@ -3555,32 +3498,29 @@ sub cellbuf_resize {    # $int ($c, $w, $h)
 #
 
 sub send_literal {   # $int ($rv, $a)
-  my ($rv, $a) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _Str,
+  );
+  my ($rv, $a) = $sig->(@_);
   $global->{outbuf} .= $a;
   return TB_OK;
 }
 
 sub send_num {   # $int ($rv, \$buf, $n)
-  my ($rv, $buf, $n) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _SCALAR0,
-      3 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _ScalarRef,
+    _PositiveOrZeroInt,
+  );
+  my ($rv, $buf, $n) = $sig->(@_);
   $global->{outbuf} .= sprintf('%u', $n);
   return TB_OK;
 }
 
 sub send_init_escape_codes {   # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   my $rv;
   $rv = bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_ENTER_CA]);
   return $rv if $rv != TB_OK;
@@ -3592,7 +3532,8 @@ sub send_init_escape_codes {   # $int ()
 }
 
 sub send_clear {   # $int ()
-  @_ == 0 or return TB_ERR;
+  state $sig = compile();
+  $sig->(@_);
   my $rv;
 
   $rv = send_attr($global->{fg}, $global->{bg});
@@ -3612,13 +3553,11 @@ sub send_clear {   # $int ()
 }
 
 sub send_attr {    # $int ($fg, $bg)
-  my ($fg, $bg) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..2 } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+  );
+  my ($fg, $bg) = $sig->(@_);
   my $rv;
 
   if ($fg == $global->{last_fg} && $bg == $global->{last_bg}) {
@@ -3747,15 +3686,13 @@ sub send_attr {    # $int ($fg, $bg)
 }
 
 sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
-  my ($cfg, $cbg, $fg_is_default, $bg_is_default) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _NONNEGINT,
-      3 => _BOOL,
-      4 => _BOOL,
-    } => { map { $_ => $_[$_-1] } 1..4 } or return TB_ERR;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _Bool,
+    _Bool,
+  );
+  my ($cfg, $cbg, $fg_is_default, $bg_is_default) = $sig->(@_);
   my $rv;
   my $nbuf = '';
 
@@ -3829,13 +3766,11 @@ sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
 }
 
 sub send_cursor_if {    # $int ($x, $y)
-  my ($x, $y) = @_;
-  if (STRICT) {
-    check {
-      1 => _INT,
-      2 => _INT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Int,
+    _Int,
+  );
+  my ($x, $y) = $sig->(@_);
   my $rv;
   my $nbuf = '';
   return TB_OK if $x < 0 || $y < 0;
@@ -3848,28 +3783,23 @@ sub send_cursor_if {    # $int ($x, $y)
 }
 
 sub send_char {    # $int ($x, $y, $ch)
-  my ($x, $y, $ch) = @_;
-  if (STRICT) {
-    check {
-      1 => _INT,
-      2 => _INT,
-      3 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _Int,
+    _Int,
+    _PositiveOrZeroInt,
+  );
+  my ($x, $y, $ch) = $sig->(@_);
   return send_cluster($x, $y, [$ch], 1);
 }
 
 sub send_cluster {    # $int ($x, $y, \@ch, $nch)
-  my ($x, $y, $ch, $nch) = @_;
-  if (STRICT) {
-    check {
-      1 => _INT,
-      2 => _INT,
-      3 => _ARRAY0,
-      4 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-    return TB_ERR if @$ch != $nch;
-  }
+  state $sig = compile(
+    _Int,
+    _Int,
+    _ArrayRef,
+    _PositiveOrZeroInt,
+  );
+  my ($x, $y, $ch, $nch) = $sig->(@_);
 
   if ($global->{last_x} != $x - 1 || $global->{last_y} != $y) {
     my $rv = send_cursor_if($x, $y);
@@ -3883,20 +3813,19 @@ sub send_cluster {    # $int ($x, $y, \@ch, $nch)
       $ch32 = 0xfffd;    # replace non-printable codepoints with U+FFFD
     }
     my $cu8_len = tb_utf8_unicode_to_char(\my $chu8, $ch32);
-    $global->{outbuf} .= $chu8;
+    my $rv = bytebuf_nputs(\$global->{outbuf}, $chu8, $cu8_len);
+    return $rv if $rv != TB_OK;
   }
 
   return TB_OK;
 }
 
 sub convert_num {    # $len ($num, \$buf)
-  my ($num, $buf) = @_;
-  if (STRICT) {
-    check {
-      1 => _NONNEGINT,
-      2 => _SCALAR0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return -1;
-  }
+  state $sig = compile(
+    _PositiveOrZeroInt,
+    _ScalarRef,
+  );
+  my ($num, $buf) = $sig->(@_);
   $$buf = sprintf('%u', $num);
   return bytes::length($$buf);
 }
@@ -3906,43 +3835,33 @@ sub convert_num {    # $len ($num, \$buf)
 #
 
 sub bytebuf_puts {    # $int (\$buf, $str)
-  my ($b, $str) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _STRING0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $str // return TB_ERR;
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _Str,
+  );
+  my ($b, $str) = $sig->(@_);
   # Nothing to do for empty caps
   $$b .= $str if bytes::length($str);
   return TB_OK
 }
 
 sub bytebuf_nputs {    # $int (\$buf, $str, $nstr)
-  my ($b, $str, $nstr) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _STRING0,
-      3 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  } else {
-    $str .= '';
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _Str,
+    _PositiveOrZeroInt,
+  );
+  my ($b, $str, $nstr) = $sig->(@_);
   $$b .= bytes::substr($str, 0, $nstr);
   return TB_OK;
 }
 
 sub bytebuf_shift {    # $int (\$buf, $n)
-  my ($b, $n) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _PositiveOrZeroInt,
+  );
+  my ($b, $n) = $sig->(@_);
   use bytes;
   $n = length($$b) if $n > length($$b);
   substr($$b, 0, $n, '');
@@ -3950,13 +3869,11 @@ sub bytebuf_shift {    # $int (\$buf, $n)
 }
 
 sub bytebuf_flush {    # $int (\$buf, $fd)
-  my ($b, $fd) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _INT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _Int,
+  );
+  my ($b, $fd) = $sig->(@_);
   use bytes;
   return TB_OK unless length($$b);
   my $want = length($$b);
@@ -3970,23 +3887,19 @@ sub bytebuf_flush {    # $int (\$buf, $fd)
 }
 
 sub bytebuf_reserve {    # $int (\$buf, $sz)
-  my ($b, $sz) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-      2 => _NONNEGINT,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _ScalarRef,
+    _PositiveOrZeroInt,
+  );
+  $sig->(@_);
   return TB_OK;
 }
 
 sub bytebuf_free {    # $int (\$buf)
-  my ($b) = @_;
-  if (STRICT) {
-    check {
-      1 => _SCALAR0,
-    } => { map { $_ => $_[$_-1] } 1..@_ } or return TB_ERR;
-  }
+  state $sig = compile(
+    _ScalarRef,
+  );
+  my ($b) = $sig->(@_);
   $$b = '';
   return TB_OK;
 }

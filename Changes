@@ -1,5 +1,13 @@
 Revision history for Termbox
 
+0.004002
+        2026-06-18
+        - Validation: refactor to compiled signatures, remove check() calls
+        - API/Templates: stricter validation, refactor type definitions
+        - Dependencies: reduce non-core dependencies
+        - Fix: consistent return values and improved undef handling
+        - Add: comprehensive POD documentation
+        
 0.004001
         2026-06-03
         - Tests: stabilize terminfo tests for CI environments

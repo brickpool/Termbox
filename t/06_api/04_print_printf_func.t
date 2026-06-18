@@ -45,7 +45,7 @@ subtest 'tb_print and tb_print_ex' => sub {
   $rv = tb_print_ex(0, 0, 0, 0, undef, "");
   ok(valid_preinit_status($rv), 'tb_print_ex handles empty string');
 
-  $rv = tb_print_ex(-1, -1, 0, 0, undef, 'X');
+  $rv = eval { tb_print_ex(-1, -1, 0, 0, undef, 'X') } // TB_ERR();
   ok(valid_preinit_status($rv), 'tb_print_ex handles invalid position');
 };
 

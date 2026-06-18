@@ -1,27 +1,33 @@
 =head1 Termbox::PP
 
-B<Termbox::PP> is a Perl module that provides a minimalistic API and enables 
-Perl programmers to create text-based user interfaces.
+Termbox::PP is a minimalistic terminal UI library in pure Perl
 
-Here are three outstanding advantages:
+=head2 Description
+
+B<Termbox::PP> provides a small and consistent API for building
+text-based user interfaces in Perl.
+
+It focuses on the common subset of functionality shared across
+modern terminal emulators, offering a simple and portable abstraction.
+
+=head2 Features
 
 =over
 
-=item 1 B<Pure Perl>
+=item * Portable abstraction
 
-The library is implemented in pure Perl and does not require any XS or C code. 
-This makes it very portable and easy to install on any I<*nix> operating system 
-with a Perl interpreter.
+Provides a minimal set of functions that work consistently across
+different terminal environments.
 
-=item 2 B<Abstraction of functions> 
+=item * Small and simple API
 
-The basic idea is to abstract the largest common subset of functions available 
-on all major terminals and other terminal-like APIs in a minimalistic way.
+The limited API surface makes the module easy to learn, test, and maintain.
 
-=item 3 B<Simplicity of the API> 
+=item * Pure Perl implementation
 
-A small API means that it is easy to implement, test, maintain and learn. This 
-makes termbox a unique library.
+The module is implemented entirely in Perl and does not require XS or
+any external C libraries. It only depends on core modules available
+since Perl L<v5.10|https://metacpan.org/release/DAPM/perl-5.10.1>.
 
 =back
 
@@ -41,20 +47,6 @@ Manual install:
   perl Makefile.PL
   make
   make install
-
-=head2 Dependencies
-
-B<Termbox::PP> mainly needs Core modules of Perl >= 
-L<v5.10|http://metacpan.org/release/DAPM/perl-5.10.1> and these modules for
-development and testing:
-
-=over
-
-=item * L<Devel::StrictMode>
-
-=item * L<Test::Exception>  (only for testing)
-
-=back
 
 =head2 Examples
 
@@ -79,7 +71,7 @@ B<Termbox::PP> is a port of L<termbox2|https://github.com/termbox/termbox2>.
 
 =over
 
-=item * Copyright (c) 2021 by termbox developers
+=item * Copyright (c) 2010-2026 by termbox developers
 
 =item * MIT License
 

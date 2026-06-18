@@ -3,11 +3,20 @@ use strict;
 use warnings;
 
 use Test::More;
-use Test::Exception;
 
 BEGIN {
   require_ok 'Termbox::PP';
   use_ok 'Termbox', qw( :return );
+}
+
+sub lives_ok (&$) {
+  my ($code, $name) = @_;
+  my $error;
+  my $ok = eval { $code->(); 1 };
+  $error = $@;
+  ok($ok, $name);
+  diag("Died with: $error") unless $ok;
+  return $ok;
 }
 
 subtest 'cell_set accepts codepoint' => sub {
@@ -36,22 +45,18 @@ subtest 'cell_set accepts arrayref of codepoints' => sub {
 };
 
 subtest 'cell_set rejects string input' => sub {
-  plan tests => 2;
   my $cell = Termbox::Cell->new();
   my $rv;
 
-  lives_ok { $rv = Termbox::cell_set($cell, 'A', 1, 1, 2) } 
-    'call cell_set(string)';
+  $rv = eval { Termbox::cell_set($cell, 'A', 1, 1, 2) } // TB_ERR();
   is($rv, TB_ERR(), 'returns TB_ERR for string input');
 };
 
 subtest 'cell_set rejects numeric scalar input' => sub {
-  plan tests => 2;
   my $cell = Termbox::Cell->new();
   my $rv;
 
-  lives_ok { $rv = Termbox::cell_set($cell, ord('A'), 1, 1, 2) } 
-    'call cell_set(numeric scalar)';
+  $rv = eval { Termbox::cell_set($cell, ord('A'), 1, 1, 2) } // TB_ERR();
   is($rv, TB_ERR(), 'returns TB_ERR for numeric scalar input');
 };
 

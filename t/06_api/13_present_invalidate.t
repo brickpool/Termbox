@@ -1,6 +1,7 @@
 use 5.010;
 use strict;
 use warnings;
+use utf8;
 
 use Test::More;
 
@@ -22,7 +23,7 @@ subtest 'tb_present basic render pass' => sub {
   local *Termbox::cellbuf_get = sub {
     my ($buf, $x, $y, $out) = @_;
     $$out = {
-      ch   => ord('A'),
+      ch   => "e\x{301}",   # 'é'
       fg   => 1,
       bg   => 2,
     };
@@ -33,8 +34,8 @@ subtest 'tb_present basic render pass' => sub {
     push @calls, 'attr';
     return TB_OK;
   };
-  local *Termbox::send_char = sub {
-    push @calls, 'char';
+  local *Termbox::send_cluster = sub {
+    push @calls, 'cluster';
     return TB_OK;
   };
   local *Termbox::send_cursor_if = sub {
@@ -57,9 +58,9 @@ subtest 'tb_present basic render pass' => sub {
 
   # Test that tb_present calls the expected output functions
   is(tb_present(), TB_OK, 'tb_present returns TB_OK');
-  ok(grep(/attr/,  @calls), 'send_attr was called');
-  ok(grep(/char/,  @calls), 'send_char was called');
-  ok(grep(/flush/, @calls), 'bytebuf_flush was called');
+  ok(grep(/attr/,    @calls), 'send_attr was called');
+  ok(grep(/cluster/, @calls), 'send_cluster was called');
+  ok(grep(/flush/,   @calls), 'bytebuf_flush was called');
 };
 
 subtest 'tb_invalidate' => sub {

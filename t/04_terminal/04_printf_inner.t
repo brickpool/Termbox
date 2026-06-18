@@ -25,7 +25,7 @@ subtest 'tb_printf_inner - error handling' => sub {
   $rv = Termbox::tb_printf_inner(0, 0, 0, 0, \$buf, 'Hello');
   is($rv, TB_OK(), 'tb_printf_inner returns valid result');
 
-  $rv = Termbox::tb_printf_inner(-1, -1, 0, 0, \$buf, 'X');
+  $rv = eval { Termbox::tb_printf_inner(-1, -1, 0, 0, \$buf, 'X') } // TB_ERR();
   ok($rv == TB_ERR() || $rv == TB_ERR_OUT_OF_BOUNDS(), 
     'tb_printf_inner handles invalid position');
 

@@ -19,12 +19,10 @@ WriteMakefile1(
   },
 
   PREREQ_PM => {
-    'Devel::StrictMode' => 0.003,
   },
 
   TEST_REQUIRES => {
-    'Test::Exception' => 0.31,
-    'Test::More'      => 1.302188,
+    'Test::More' => 1.302188,
   },
 
   META_MERGE => {
@@ -46,6 +44,7 @@ WriteMakefile1(
       runtime => {
         requires => {    # v5.10 builtin modules
 #          'bytes'           => 0,
+          'Carp'            => 0,
           'constant'        => 0,
 #          'Config'          => 0,
           'Exporter'        => 0,
@@ -72,7 +71,6 @@ WriteMakefile1(
       test => {
         requires => {    # v5.10 builtin modules
           'Data::Dumper' => 0,
-          'Devel::Peek'  => 0,
           'File::Temp'   => 0,
         },
       },

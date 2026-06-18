@@ -74,8 +74,9 @@ subtest 'tb_set_output_mode basic behaviour' => sub {
     'output mode updated'
   );
 
+  my $rv = eval { tb_set_output_mode(-1) } // TB_ERR;
   is(
-    tb_set_output_mode(-1),
+    $rv,
     TB_ERR,
     'invalid output mode rejected'
   );
