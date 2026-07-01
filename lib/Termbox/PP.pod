@@ -111,6 +111,9 @@ experimental and may evolve based on real-world usage.
 
 =head1 API OVERVIEW
 
+  require Termbox::PP;
+  use Termbox qw(:api);
+
 The following list provides an overview of the public API,
 grouped by functionality:
 
@@ -419,9 +422,9 @@ Column position (0-based).
 
 Row position (0-based).
 
-=item * $ch (Int)
+=item * $ch (Str)
 
-Unicode codepoint.
+UTF-8 string, only the first character is used.
 
 =item * $fg (Int)
 
@@ -439,9 +442,9 @@ Returns C<TB_OK> on success or a negative error code on failure.
 
 =head2 tb_set_cell_ex
 
-  my $rv = tb_set_cell_ex($x, $y, \@ch, $nch, $fg, $bg);
+  my $rv = tb_set_cell_ex($x, $y, $ch, $nch, $fg, $bg);
 
-Sets a cell using one or more Unicode codepoints (cluster).
+Sets a cell using one or more characters (extended grapheme cluster).
 
 Arguments:
 
@@ -451,13 +454,13 @@ Arguments:
 
 Cell position (0-based).
 
-=item * \@ch (ArrayRef)
+=item * $ch (Str)
 
-Array of Unicode codepoints.
+UTF-8 string containing one or more characters.
 
 =item * $nch (Int)
 
-Number of codepoints in C<\@ch>.
+Number of codepoints in C<$ch>.
 
 =item * $fg, $bg (Int)
 
@@ -474,7 +477,7 @@ Returns C<TB_OK> on success or a negative error code on failure.
 
   my $rv = tb_extend_cell($x, $y, $ch);
 
-Appends a Unicode codepoint to an existing cell.
+Appends a single character to an existing cell, extending its grapheme cluster.
 
 This is used to build extended grapheme clusters incrementally.
 
@@ -486,9 +489,9 @@ Arguments:
 
 Cell position.
 
-=item * $ch (Int)
+=item * $ch (Str)
 
-Unicode codepoint to append.
+UTF-8 string containing a single character to append.
 
 =back
 
@@ -1413,6 +1416,809 @@ Legacy option for enabling truecolor support.
 
 This option is retained for backward compatibility and should not be used
 in new code.
+
+=head1 CONSTANTS
+
+The following constants may be imported individually by name or by using
+one of the export tags.
+
+For example:
+
+    use Termbox qw(:keys :color :event :return :func);
+
+Some constants are aliases for the same numeric value. This mirrors the
+underlying terminal input model where different key names may produce the
+same byte value.
+
+=head2 C<:keys>
+
+Imports key constants used with C<< $tb_event->key >>.
+
+This includes ASCII control-key constants, printable ASCII key constants,
+terminal-dependent key constants, and terminfo capability constants.
+
+=head3 ASCII key constants
+
+These constants represent ASCII control characters and selected printable
+ASCII keys.
+
+Several names intentionally share the same value. For example,
+C<TB_KEY_CTRL_H> and C<TB_KEY_BACKSPACE> both represent C<0x08>.
+
+=over 4
+
+=item C<TB_KEY_CTRL_TILDE> C<(0x00)>
+
+Control-tilde.
+
+=item C<TB_KEY_CTRL_2> C<(0x00)>
+
+Alias for C<TB_KEY_CTRL_TILDE>.
+
+=item C<TB_KEY_CTRL_A> C<(0x01)>
+
+Control-A.
+
+=item C<TB_KEY_CTRL_B> C<(0x02)>
+
+Control-B.
+
+=item C<TB_KEY_CTRL_C> C<(0x03)>
+
+Control-C.
+
+=item C<TB_KEY_CTRL_D> C<(0x04)>
+
+Control-D.
+
+=item C<TB_KEY_CTRL_E> C<(0x05)>
+
+Control-E.
+
+=item C<TB_KEY_CTRL_F> C<(0x06)>
+
+Control-F.
+
+=item C<TB_KEY_CTRL_G> C<(0x07)>
+
+Control-G.
+
+=item C<TB_KEY_BACKSPACE> C<(0x08)>
+
+Backspace.
+
+=item C<TB_KEY_CTRL_H> C<(0x08)>
+
+Alias for C<TB_KEY_BACKSPACE>.
+
+=item C<TB_KEY_TAB> C<(0x09)>
+
+Tab.
+
+=item C<TB_KEY_CTRL_I> C<(0x09)>
+
+Alias for C<TB_KEY_TAB>.
+
+=item C<TB_KEY_CTRL_J> C<(0x0a)>
+
+Control-J.
+
+=item C<TB_KEY_CTRL_K> C<(0x0b)>
+
+Control-K.
+
+=item C<TB_KEY_CTRL_L> C<(0x0c)>
+
+Control-L.
+
+=item C<TB_KEY_ENTER> C<(0x0d)>
+
+Enter.
+
+=item C<TB_KEY_CTRL_M> C<(0x0d)>
+
+Alias for C<TB_KEY_ENTER>.
+
+=item C<TB_KEY_CTRL_N> C<(0x0e)>
+
+Control-N.
+
+=item C<TB_KEY_CTRL_O> C<(0x0f)>
+
+Control-O.
+
+=item C<TB_KEY_CTRL_P> C<(0x10)>
+
+Control-P.
+
+=item C<TB_KEY_CTRL_Q> C<(0x11)>
+
+Control-Q.
+
+=item C<TB_KEY_CTRL_R> C<(0x12)>
+
+Control-R.
+
+=item C<TB_KEY_CTRL_S> C<(0x13)>
+
+Control-S.
+
+=item C<TB_KEY_CTRL_T> C<(0x14)>
+
+Control-T.
+
+=item C<TB_KEY_CTRL_U> C<(0x15)>
+
+Control-U.
+
+=item C<TB_KEY_CTRL_V> C<(0x16)>
+
+Control-V.
+
+=item C<TB_KEY_CTRL_W> C<(0x17)>
+
+Control-W.
+
+=item C<TB_KEY_CTRL_X> C<(0x18)>
+
+Control-X.
+
+=item C<TB_KEY_CTRL_Y> C<(0x19)>
+
+Control-Y.
+
+=item C<TB_KEY_CTRL_Z> C<(0x1a)>
+
+Control-Z.
+
+=item C<TB_KEY_ESC> C<(0x1b)>
+
+Escape.
+
+=item C<TB_KEY_CTRL_LSQ_BRACKET> C<(0x1b)>
+
+Alias for C<TB_KEY_ESC>.
+
+=item C<TB_KEY_CTRL_3> C<(0x1b)>
+
+Alias for C<TB_KEY_ESC>.
+
+=item C<TB_KEY_CTRL_4> C<(0x1c)>
+
+Control-4.
+
+=item C<TB_KEY_CTRL_BACKSLASH> C<(0x1c)>
+
+Alias for C<TB_KEY_CTRL_4>.
+
+=item C<TB_KEY_CTRL_5> C<(0x1d)>
+
+Control-5.
+
+=item C<TB_KEY_CTRL_RSQ_BRACKET> C<(0x1d)>
+
+Alias for C<TB_KEY_CTRL_5>.
+
+=item C<TB_KEY_CTRL_6> C<(0x1e)>
+
+Control-6.
+
+=item C<TB_KEY_CTRL_7> C<(0x1f)>
+
+Control-7.
+
+=item C<TB_KEY_CTRL_SLASH> C<(0x1f)>
+
+Alias for C<TB_KEY_CTRL_7>.
+
+=item C<TB_KEY_CTRL_UNDERSCORE> C<(0x1f)>
+
+Alias for C<TB_KEY_CTRL_7>.
+
+=item C<TB_KEY_SPACE> C<(0x20)>
+
+Space.
+
+=item C<TB_KEY_BACKSPACE2> C<(0x7f)>
+
+Alternative Backspace value.
+
+=item C<TB_KEY_CTRL_8> C<(0x7f)>
+
+Alias for C<TB_KEY_BACKSPACE2>.
+
+=back
+
+=head3 Terminal-dependent key constants
+
+These constants are used with C<< $tb_event->key >> for keys that are not
+represented by simple ASCII values.
+
+The numeric values are allocated from the upper end of the 16-bit range.
+
+=over 4
+
+=item C<TB_KEY_F1> .. C<TB_KEY_F12>
+
+Function keys F1 through F12.
+
+=item C<TB_KEY_INSERT>
+
+Insert key.
+
+=item C<TB_KEY_DELETE>
+
+Delete key.
+
+=item C<TB_KEY_HOME>
+
+Home key.
+
+=item C<TB_KEY_END>
+
+End key.
+
+=item C<TB_KEY_PGUP>
+
+Page Up key.
+
+=item C<TB_KEY_PGDN>
+
+Page Down key.
+
+=item C<TB_KEY_ARROW_UP>
+
+Arrow Up key.
+
+=item C<TB_KEY_ARROW_DOWN>
+
+Arrow Down key.
+
+=item C<TB_KEY_ARROW_LEFT>
+
+Arrow Left key.
+
+=item C<TB_KEY_ARROW_RIGHT>
+
+Arrow Right key.
+
+=item C<TB_KEY_BACK_TAB>
+
+Back Tab key, usually Shift-Tab.
+
+=item C<TB_KEY_MOUSE_LEFT>
+
+Left mouse button.
+
+=item C<TB_KEY_MOUSE_RIGHT>
+
+Right mouse button.
+
+=item C<TB_KEY_MOUSE_MIDDLE>
+
+Middle mouse button.
+
+=item C<TB_KEY_MOUSE_RELEASE>
+
+Mouse button release.
+
+=item C<TB_KEY_MOUSE_WHEEL_UP>
+
+Mouse wheel up.
+
+=item C<TB_KEY_MOUSE_WHEEL_DOWN>
+
+Mouse wheel down.
+
+=back
+
+=head3 Terminfo capability constants
+
+These constants identify terminal capabilities.
+
+They are mostly useful internally or when working directly with lower-level
+capability handling.
+
+=over 4
+
+=item C<TB_CAP_F1> .. C<TB_CAP_F12>
+
+Capabilities for function keys F1 through F12.
+
+=item C<TB_CAP_INSERT>
+
+Insert key capability.
+
+=item C<TB_CAP_DELETE>
+
+Delete key capability.
+
+=item C<TB_CAP_HOME>
+
+Home key capability.
+
+=item C<TB_CAP_END>
+
+End key capability.
+
+=item C<TB_CAP_PGUP>
+
+Page Up key capability.
+
+=item C<TB_CAP_PGDN>
+
+Page Down key capability.
+
+=item C<TB_CAP_ARROW_UP>
+
+Arrow Up key capability.
+
+=item C<TB_CAP_ARROW_DOWN>
+
+Arrow Down key capability.
+
+=item C<TB_CAP_ARROW_LEFT>
+
+Arrow Left key capability.
+
+=item C<TB_CAP_ARROW_RIGHT>
+
+Arrow Right key capability.
+
+=item C<TB_CAP_BACK_TAB>
+
+Back Tab key capability.
+
+=item C<TB_CAP__COUNT_KEYS>
+
+Number of key capabilities.
+
+=item C<TB_CAP_ENTER_CA>
+
+Enter cursor addressing mode.
+
+=item C<TB_CAP_EXIT_CA>
+
+Exit cursor addressing mode.
+
+=item C<TB_CAP_SHOW_CURSOR>
+
+Show the terminal cursor.
+
+=item C<TB_CAP_HIDE_CURSOR>
+
+Hide the terminal cursor.
+
+=item C<TB_CAP_CLEAR_SCREEN>
+
+Clear the screen.
+
+=item C<TB_CAP_SGR0>
+
+Reset terminal attributes.
+
+=item C<TB_CAP_UNDERLINE>
+
+Enable underline attribute.
+
+=item C<TB_CAP_BOLD>
+
+Enable bold attribute.
+
+=item C<TB_CAP_BLINK>
+
+Enable blink attribute.
+
+=item C<TB_CAP_ITALIC>
+
+Enable italic attribute.
+
+=item C<TB_CAP_REVERSE>
+
+Enable reverse-video attribute.
+
+=item C<TB_CAP_ENTER_KEYPAD>
+
+Enter keypad mode.
+
+=item C<TB_CAP_EXIT_KEYPAD>
+
+Exit keypad mode.
+
+=item C<TB_CAP_DIM>
+
+Enable dim attribute.
+
+=item C<TB_CAP_INVISIBLE>
+
+Enable invisible attribute.
+
+=item C<TB_CAP__COUNT>
+
+Number of known capabilities.
+
+=back
+
+For the upstream definition see
+L<termbox2.h|https://github.com/termbox/termbox2/blob/605398fa79108412976191e062ea14bd4bd30213/termbox2.h#L127>.
+
+=head2 C<:color>
+
+Imports foreground and background color constants as well as text
+attribute constants.
+
+Color constants can be combined with attribute constants using bitwise
+or.
+
+For example:
+
+    my $fg = TB_RED | TB_BOLD;
+    my $bg = TB_DEFAULT;
+
+=head3 Basic colors
+
+=over 4
+
+=item C<TB_DEFAULT>
+
+Default terminal color.
+
+=item C<TB_BLACK>
+
+Black.
+
+=item C<TB_RED>
+
+Red.
+
+=item C<TB_GREEN>
+
+Green.
+
+=item C<TB_YELLOW>
+
+Yellow.
+
+=item C<TB_BLUE>
+
+Blue.
+
+=item C<TB_MAGENTA>
+
+Magenta.
+
+=item C<TB_CYAN>
+
+Cyan.
+
+=item C<TB_WHITE>
+
+White.
+
+=back
+
+=head3 Text attributes
+
+=over 4
+
+=item C<TB_BOLD>
+
+Bold text.
+
+=item C<TB_UNDERLINE>
+
+Underlined text.
+
+=item C<TB_REVERSE>
+
+Reverse-video text.
+
+=item C<TB_ITALIC>
+
+Italic text.
+
+=item C<TB_BLINK>
+
+Blinking text.
+
+=back
+
+=head3 Extended color support
+
+=over 4
+
+=item C<TB_256_BLACK>
+
+Base value for 256-color mode.
+
+=back
+
+=head3 Truecolor attributes
+
+These constants are only available when truecolor support is enabled.
+
+=over 4
+
+=item C<TB_TRUECOLOR_BOLD>
+
+Bold text in truecolor mode.
+
+=item C<TB_TRUECOLOR_UNDERLINE>
+
+Underlined text in truecolor mode.
+
+=item C<TB_TRUECOLOR_REVERSE>
+
+Reverse-video text in truecolor mode.
+
+=item C<TB_TRUECOLOR_ITALIC>
+
+Italic text in truecolor mode.
+
+=item C<TB_TRUECOLOR_BLINK>
+
+Blinking text in truecolor mode.
+
+=item C<TB_TRUECOLOR_BLACK>
+
+Base value for truecolor black.
+
+=back
+
+For the upstream definition see
+L<termbox2.h|https://github.com/termbox/termbox2/blob/605398fa79108412976191e062ea14bd4bd30213/termbox2.h#L257>.
+
+=head2 C<:event>
+
+Imports event type constants, key modifier constants, input mode
+constants, and output mode constants.
+
+=head3 Event types
+
+These constants are used with C<tb_event.type>.
+
+=over 4
+
+=item C<TB_EVENT_KEY>
+
+Keyboard event.
+
+=item C<TB_EVENT_RESIZE>
+
+Terminal resize event.
+
+=item C<TB_EVENT_MOUSE>
+
+Mouse event.
+
+=back
+
+=head3 Key modifiers
+
+These constants are bit flags used with C<tb_event.mod>.
+
+=over 4
+
+=item C<TB_MOD_ALT>
+
+Alt modifier.
+
+=item C<TB_MOD_CTRL>
+
+Control modifier.
+
+=item C<TB_MOD_SHIFT>
+
+Shift modifier.
+
+=item C<TB_MOD_MOTION>
+
+Mouse motion modifier.
+
+=back
+
+=head3 Input modes
+
+These constants are used with C<tb_set_input_mode>.
+
+=over 4
+
+=item C<TB_INPUT_CURRENT>
+
+Return or keep the current input mode.
+
+=item C<TB_INPUT_ESC>
+
+Use escape-based input mode.
+
+=item C<TB_INPUT_ALT>
+
+Use Alt-key input mode.
+
+=item C<TB_INPUT_MOUSE>
+
+Enable mouse input.
+
+=back
+
+=head3 Output modes
+
+These constants are used with C<tb_set_output_mode>.
+
+=over 4
+
+=item C<TB_OUTPUT_CURRENT>
+
+Return or keep the current output mode.
+
+=item C<TB_OUTPUT_NORMAL>
+
+Normal 8-color output mode.
+
+=item C<TB_OUTPUT_256>
+
+256-color output mode.
+
+=item C<TB_OUTPUT_216>
+
+216-color output mode.
+
+=item C<TB_OUTPUT_GRAYSCALE>
+
+Grayscale output mode.
+
+=item C<TB_OUTPUT_TRUECOLOR>
+
+Truecolor output mode.
+
+This constant is only available when truecolor support is enabled.
+
+=back
+
+For the upstream definition see
+L<termbox2.h|https://github.com/termbox/termbox2/blob/605398fa79108412976191e062ea14bd4bd30213/termbox2.h#L303>.
+
+=head2 C<:return>
+
+Imports common function return values.
+
+Most Termbox functions return C<TB_OK> on success or a negative
+C<TB_ERR_*> value on failure unless documented otherwise.
+
+Library behavior is undefined after receiving C<TB_ERR_MEM>. Callers may
+attempt to recover, calling C<tb_shutdown>, and then calling C<tb_init> again.
+
+=head3 Return values
+
+=over 4
+
+=item C<TB_OK>
+
+Operation completed successfully.
+
+=item C<TB_ERR>
+
+Generic error.
+
+=item C<TB_ERR_NEED_MORE>
+
+More input is required.
+
+=item C<TB_ERR_INIT_ALREADY>
+
+Termbox has already been initialized.
+
+=item C<TB_ERR_INIT_OPEN>
+
+Failed to open the terminal.
+
+=item C<TB_ERR_MEM>
+
+Memory allocation failed.
+
+=item C<TB_ERR_NO_EVENT>
+
+No event is available.
+
+=item C<TB_ERR_NO_TERM>
+
+No terminal is available.
+
+=item C<TB_ERR_NOT_INIT>
+
+Termbox has not been initialized.
+
+=item C<TB_ERR_OUT_OF_BOUNDS>
+
+Coordinates are outside the valid screen area.
+
+=item C<TB_ERR_READ>
+
+Read operation failed.
+
+=item C<TB_ERR_RESIZE_IOCTL>
+
+Resize ioctl operation failed.
+
+=item C<TB_ERR_RESIZE_PIPE>
+
+Resize pipe operation failed.
+
+=item C<TB_ERR_RESIZE_SIGACTION>
+
+Resize signal handler setup failed.
+
+=item C<TB_ERR_POLL>
+
+Poll operation failed.
+
+=item C<TB_ERR_TCGETATTR>
+
+Failed to read terminal attributes.
+
+=item C<TB_ERR_TCSETATTR>
+
+Failed to set terminal attributes.
+
+=item C<TB_ERR_UNSUPPORTED_TERM>
+
+Unsupported terminal.
+
+=item C<TB_ERR_RESIZE_WRITE>
+
+Resize write operation failed.
+
+=item C<TB_ERR_RESIZE_POLL>
+
+Resize poll operation failed.
+
+=item C<TB_ERR_RESIZE_READ>
+
+Resize read operation failed.
+
+=item C<TB_ERR_RESIZE_SSCANF>
+
+Resize parsing failed.
+
+=item C<TB_ERR_CAP_COLLISION>
+
+Capability collision detected.
+
+=back
+
+=head3 Compatibility aliases
+
+=over 4
+
+=item C<TB_ERR_SELECT>
+
+Alias for C<TB_ERR_POLL>.
+
+=item C<TB_ERR_RESIZE_SELECT>
+
+Alias for C<TB_ERR_RESIZE_POLL>.
+
+=back
+
+For the upstream definition see
+L<termbox2.h|https://github.com/termbox/termbox2/blob/605398fa79108412976191e062ea14bd4bd30213/termbox2.h#L330>.
+
+=head2 C<:func>
+
+Imports function hook type constants for use with
+C<tb_set_func($fn_type, $func)>.
+
+=over 4
+
+=item C<TB_FUNC_EXTRACT_PRE>
+
+Function hook called before extraction.
+
+=item C<TB_FUNC_EXTRACT_POST>
+
+Function hook called after extraction.
+
+=back
 
 =head1 AUTHOR
 

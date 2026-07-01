@@ -25,10 +25,10 @@ note 'Cell content APIs';
 subtest 'pre-init status checks' => sub {
   plan tests => 4;
 
-  my $rv = tb_set_cell(0, 0, ord('A'), 0, 0);
+  my $rv = tb_set_cell(0, 0, 'A', 0, 0);
   ok(valid_preinit_status($rv), 'tb_set_cell returns expected pre-init status');
 
-  $rv = tb_set_cell_ex(0, 0, [ord('A')], 1, 0, 0);
+  $rv = tb_set_cell_ex(0, 0, 'A', 1, 0, 0);
   ok(
     valid_preinit_status($rv), 
     'tb_set_cell_ex returns expected pre-init status'
@@ -40,7 +40,7 @@ subtest 'pre-init status checks' => sub {
     'tb_extend_cell returns expected pre-init status'
   );
 
-  $rv = tb_set_cell_ex(0, 0, [], 0, 0, 0);
+  $rv = tb_set_cell_ex(0, 0, '', 0, 0, 0);
   ok(
     valid_preinit_status($rv),
     'tb_set_cell_ex handles empty cluster pre-init'
@@ -58,7 +58,7 @@ subtest 'set-cell APIs after init' => sub {
 
   plan tests => 9;
 
-  $rv = tb_set_cell(0, 0, ord('A'), 0, 0);
+  $rv = tb_set_cell(0, 0, 'A', 0, 0);
   is($rv, TB_OK(), 'tb_set_cell writes one codepoint');
 
   my $cells;
@@ -68,11 +68,11 @@ subtest 'set-cell APIs after init' => sub {
   }
   is($cells->[0]->{ch}, 'A', 'tb_set_cell stores expected text');
 
-  $rv = tb_set_cell_ex(0, 0, [ord('A'), 0x0301], 2, 0, 0);
+  $rv = tb_set_cell_ex(0, 0, pack('U*', ord('A'), 0x0301), 2, 0, 0);
   is($rv, TB_OK(), 'tb_set_cell_ex writes a cluster');
   is($cells->[0]->{ch}, "A\x{0301}", 'tb_set_cell_ex stores combined grapheme');
 
-  $rv = tb_extend_cell(0, 0, 0x0327);
+  $rv = tb_extend_cell(0, 0, chr 0x0327);
   is($rv, TB_OK(), 'tb_extend_cell appends one codepoint');
   is(
     $cells->[0]->{ch},
@@ -80,7 +80,7 @@ subtest 'set-cell APIs after init' => sub {
     'tb_extend_cell appends to existing grapheme'
   );
 
-  $rv = tb_set_cell_ex(0, 0, [], 0, 0, 0);
+  $rv = tb_set_cell_ex(0, 0, '', 0, 0, 0);
   is($rv, TB_OK(), 'tb_set_cell_ex accept empty cluster');
   is($cells->[0]->{ch}, "\0", 
     'tb_set_cell_ex with empty cluster sets cell to null character');

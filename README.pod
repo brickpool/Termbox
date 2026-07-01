@@ -63,7 +63,7 @@ B<Termbox::PP> is a port of L<termbox2|https://github.com/termbox/termbox2>.
 
 =over
 
-=item * 2024,2026 J. Schneider E<lt>L<http://github.com/brickpool>E<gt>
+=item * 2024-2026 J. Schneider E<lt>L<http://github.com/brickpool>E<gt>
 
 =back
 

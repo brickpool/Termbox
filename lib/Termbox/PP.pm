@@ -8,7 +8,7 @@
 #                 2010-2020 nsf <no.smile.face@gmail.com>
 #
 # ------------------------------------------------------------------------
-#   Author: 2024,2026 J. Schneider
+#   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
 package Termbox;
@@ -24,7 +24,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.4.2');
+our $VERSION = version->declare('v0.4.3');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -311,6 +311,9 @@ our %EXPORT_TAGS = (
     TB_REVERSE
     TB_ITALIC
     TB_BLINK
+    TB_HI_BLACK
+    TB_BRIGHT
+    TB_DIM
     ), 
     TB_OPT_ATTR_W == 32
     ? qw( TB_256_BLACK )
@@ -319,7 +322,13 @@ our %EXPORT_TAGS = (
           TB_TRUECOLOR_REVERSE
           TB_TRUECOLOR_ITALIC
           TB_TRUECOLOR_BLINK
-          TB_TRUECOLOR_BLACK )
+          TB_TRUECOLOR_BLACK ),
+    TB_OPT_ATTR_W == 64
+    ? qw( TB_STRIKEOUT
+          TB_UNDERLINE_2
+          TB_OVERLINE
+          TB_INVISIBLE )
+    : ()
   ],
 
   event => [qw(
@@ -842,10 +851,10 @@ use constant {
   _Object   => { required => 1, allow => \&blessed },
 };
 
-sub Maybe ($) {
+sub _Maybe ($) {
   my ($aref) = @_;
 
-  Carp::croak("Maybe['a] expects exactly one template hashref")
+  Carp::croak("_Maybe['a] expects exactly one template hashref")
     unless ref($aref) eq 'ARRAY' && @$aref == 1 && ref($aref->[0]) eq 'HASH';
 
   my ($t) = @$aref;
@@ -1721,30 +1730,33 @@ sub tb_set_cell {    # $int ($x, $y, $ch, $fg, $bg)
   state $sig = compile(
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Str,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
   );
   my ($x, $y, $ch, $fg, $bg) = $sig->(@_);
-  return tb_set_cell_ex($x, $y, [$ch], 1, $fg, $bg);
+  # Note: tb_set_cell stores only the first Perl character
+  return tb_set_cell_ex($x, $y, substr($ch, 0, 1), 1, $fg, $bg);
 }
 
-sub tb_set_cell_ex {    # $int ($x, $y, \@ch, $nch, $fg, $bg)
+sub tb_set_cell_ex {    # $int ($x, $y, $ch, $nch, $fg, $bg)
   state $sig = compile(
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
-    _ArrayRef,
+    _Str,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
   );
   my ($x, $y, $ch, $nch, $fg, $bg) = $sig->(@_);
+  # Note: ch is a Perl string, not an array of codepoints
+  # Note: nch is accepted for API compatibility but ignored in the Perl port
   return TB_ERR_NOT_INIT unless $global->{initialized};
   my $rv;
   my $cell;
   $rv = cellbuf_get($global->{back}, $x, $y, \$cell);
   return $rv if $rv != TB_OK;
-  $rv = cell_set($cell, $ch, $nch, $fg, $bg);
+  $rv = $cell->set($ch, $fg, $bg);
   return $rv if $rv != TB_OK;
   return TB_OK;
 }
@@ -1753,7 +1765,7 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
   state $sig = compile(
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Str,
   );
   my ($x, $y, $ch) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1763,7 +1775,8 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
   my $cell;
   $rv = cellbuf_get($global->{back}, $x, $y, \$cell);
   return $rv if $rv != TB_OK;
-  $cell->{ch} .= chr($ch);
+  # Note: tb_extend_cell appends only the first Perl character
+  $cell->{ch} .= substr($ch, 0, 1);
   return TB_OK;
 }
 
@@ -1906,7 +1919,7 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
-    Maybe[_ScalarRef],
+    _Maybe[_ScalarRef],
     _Str,
   );
   my ($x, $y, $fg, $bg, $out_w, $str) = $sig->(@_);
@@ -1952,13 +1965,13 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
     }
     elsif ($w == 0) {           # combining character
       if ($back->in_bounds($x_prev, $y)) {
-        $rv = tb_extend_cell($x_prev, $y, $uni);
+        $rv = tb_extend_cell($x_prev, $y, chr $uni);
         return $rv if $rv != TB_OK;
       }
     }
     else {
       if ($back->in_bounds($x, $y)) {
-        $rv = tb_set_cell($x, $y, $uni, $fg, $bg);
+        $rv = tb_set_cell($x, $y, chr $uni, $fg, $bg);
         return $rv if $rv != TB_OK;
       }
       $x_prev = $x;
@@ -2329,7 +2342,7 @@ sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
-    Maybe[_ScalarRef],
+    _Maybe[_ScalarRef],
     _Str,
   );
   my ($x, $y, $fg, $bg, $out_w, $fmt, @args) = ($sig->(@_[0..5]), @_[6..$#_]);
@@ -2367,7 +2380,7 @@ sub tb_deinit {    # $int ()
     }
   }
 
-  $SIG{WINCH} = 'DEFAULT';
+  $SIG{WINCH} = 'DEFAULT' if exists $SIG{WINCH};
   foreach my $fd (@{ $global->{resize_pipefd}}) {
     POSIX::close($fd) if $fd >= 0;
   }
@@ -2389,7 +2402,7 @@ sub tb_deinit {    # $int ()
 sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
   state $sig = compile(
     _PositiveOrZeroInt,
-    Maybe[_ScalarRef],
+    _Maybe[_ScalarRef],
   );
   my ($ch, $width) = $sig->(@_);
 
@@ -2793,7 +2806,7 @@ sub init_resize_handler {    # $int ()
 
   $global->{resize_pipefd} = [$rfd, $wfd];
 
-  $SIG{WINCH} = \&handle_resize;
+  $SIG{WINCH} = \&handle_resize if exists $SIG{WINCH};
   return TB_OK;
 }
 
@@ -2941,7 +2954,7 @@ sub init_cap_trie {    # $int ()
 # Regex/prefix equivalent of termbox2's cap_trie_add.
 sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
   state $sig = compile(
-    Maybe[_Str],
+    _Maybe[_Str],
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
   );
@@ -2954,7 +2967,7 @@ sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
 # Returns a hash-ref node in $$last with {is_leaf,key,mod,nchildren,cap}.
 sub cap_trie_find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
   state $sig = compile(
-    Maybe[_Str],
+    _Maybe[_Str],
     _PositiveOrZeroInt,
     _ScalarRef,
     _ScalarRef,
@@ -3392,7 +3405,7 @@ sub cell_copy {    # $int ($dst, $src)
   goto &Termbox::Cell::copy;
 }
 
-sub cell_set {    # $int ($cell, $ch, $nch, $fg, $bg)
+sub cell_set {    # $int ($cell, \@ch, $nch, $fg, $bg)
   state $sig = compile(
     _Object,
     _ArrayRef,

@@ -1,5 +1,11 @@
 Revision history for Termbox
 
+0.004003
+        2026-07-01
+        - Change: store cell contents as Perl strings instead of codepoints
+        - Change: treat tb_set_cell*/tb_extend_cell as a Perl string
+        - Add: exported constant definition documented in the POD
+
 0.004002
         2026-06-18
         - Validation: refactor to compiled signatures, remove check() calls
