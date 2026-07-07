@@ -26,6 +26,9 @@ WriteMakefile1(
   },
 
   META_MERGE => {
+    no_index => {
+      package => ['Termbox'],
+    },
     'meta-spec' => { 
       version => 2 
     },
@@ -92,13 +95,19 @@ sub WriteMakefile1 { # void (%params)
   $eumm_version = eval $eumm_version;
 
   if ($params{TEST_REQUIRES} and $eumm_version < 6.6303) {
-      $params{BUILD_REQUIRES}={ %{$params{BUILD_REQUIRES} || {}} , %{$params{TEST_REQUIRES}} };
-      delete $params{TEST_REQUIRES};
+    $params{BUILD_REQUIRES} = {
+      %{$params{BUILD_REQUIRES} || {}} , 
+      %{$params{TEST_REQUIRES}}
+    };
+    delete $params{TEST_REQUIRES};
   }
   if ($params{BUILD_REQUIRES} and $eumm_version < 6.5503) {
-      #EUMM 6.5502 has problems with BUILD_REQUIRES
-      $params{PREREQ_PM}={ %{$params{PREREQ_PM} || {}} , %{$params{BUILD_REQUIRES}} };
-      delete $params{BUILD_REQUIRES};
+    #EUMM 6.5502 has problems with BUILD_REQUIRES
+    $params{PREREQ_PM} = {
+      %{$params{PREREQ_PM} || {}} , 
+      %{$params{BUILD_REQUIRES}}
+    };
+    delete $params{BUILD_REQUIRES};
   }
 
   delete $params{CONFIGURE_REQUIRES} if $eumm_version < 6.52;

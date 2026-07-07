@@ -11,7 +11,8 @@
 #   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
-package Termbox;
+package    # hide from PAUSE
+  Termbox; ## no_index
 
 # ------------------------------------------------------------------------
 # Boilerplate ------------------------------------------------------------
@@ -24,7 +25,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.4.3');
+our $VERSION = version->declare('v0.4.4');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -47,6 +48,7 @@ use Scalar::Util qw(
   looks_like_number
   blessed
 );
+use Unicode::UCD ();
 use utf8;
 
 # ------------------------------------------------------------------------
@@ -82,9 +84,10 @@ use constant TB_OPT_READ_BUF => exists $ENV{TB_OPT_READ_BUF}
   : 64;
 
 # In this port, TB_OPT_LIBC_WCHAR selects the Unicode::UCD-based wcwidth backend
-use constant TB_OPT_LIBC_WCHAR => exists $ENV{TB_OPT_LIBC_WCHAR} 
-  ? !!$ENV{TB_OPT_LIBC_WCHAR}
-  : 1;
+use constant TB_OPT_LIBC_WCHAR => !!(
+    (exists $ENV{TB_OPT_LIBC_WCHAR} ? $ENV{TB_OPT_LIBC_WCHAR} : 1)
+  && Unicode::UCD->can('prop_invmap')
+);
 
 use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? $ENV{PATH_MAX} : 4096;
 
@@ -689,11 +692,7 @@ use vars qw( $global );
 # Utility functions ------------------------------------------------------
 # ------------------------------------------------------------------------
 
-BEGIN { if ( TB_OPT_LIBC_WCHAR ) {
-  require Unicode::UCD;
-} else {
-  require Termbox::PP::WCWidth;
-}}
+BEGIN { require Termbox::PP::WCWidth unless TB_OPT_LIBC_WCHAR }
 
 # Determine if the current locale is CJK, which affects the width of 
 # 'A' (Ambiguous) characters.

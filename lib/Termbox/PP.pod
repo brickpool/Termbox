@@ -1368,9 +1368,10 @@ Selects the backend used for Unicode width calculations.
 
 =over
 
-=item * Enabled (default)
+=item * Enabled (default, if available)
 
-Uses C<Unicode::UCD>-based width calculation.
+Uses C<Unicode::UCD>-based width calculation when 
+C<Unicode::UCD::prop_invmap> is available.
 
 =item * Disabled
 

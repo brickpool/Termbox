@@ -8,20 +8,13 @@ use Test::More;
 binmode( Test::More->builder->failure_output(), ':utf8');
 binmode( Test::More->builder->output(), ':utf8');
 
-use constant TB_OPT_LIBC_WCHAR => exists $ENV{TB_OPT_LIBC_WCHAR} 
-                                ? $ENV{TB_OPT_LIBC_WCHAR} 
-                                : 1;
-
 BEGIN {
-  if (TB_OPT_LIBC_WCHAR) {
-    require_ok 'Termbox::PP';
-    use_ok 'Termbox';
-  } else {
-    use_ok 'Termbox::PP::WCWidth';
-  }
+  require_ok 'Termbox::PP';
+  use_ok 'Termbox';
+  use_ok 'Termbox::PP::WCWidth';
 }
 
-*wcwidth = TB_OPT_LIBC_WCHAR 
+*wcwidth = Termbox::TB_OPT_LIBC_WCHAR 
          ? \&Termbox::wcwidth 
          : \&Termbox::PP::WCWidth::wcwidth;
 

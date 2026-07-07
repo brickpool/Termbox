@@ -1,5 +1,12 @@
 Revision history for Termbox
 
+0.004004
+        2026-07-07
+        - Fix on older Perl versions where Unicode::UCD::prop_invmap is not available
+        - Automatically fall back to bundled wcwidth implementation if needed
+        - Hide Termbox compatibility package from PAUSE (no_index + source annotation)
+        - Avoid UNAUTHORIZED indexing warnings for Termbox namespace
+
 0.004003
         2026-07-01
         - Change: store cell contents as Perl strings instead of codepoints
