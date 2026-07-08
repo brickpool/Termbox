@@ -4,7 +4,7 @@ use warnings;
 use Test::More;
 
 use Termbox::PP;
-use Termbox qw( :api :return :color );
+use Termbox qw( :api :color );
 
 sub screencap (&) {
   my ($code) = @_;
@@ -41,17 +41,13 @@ my @attrs = (
 );
 
 my $y = 0;
-for my $attr (@attrs) {
+foreach my $attr (@attrs) {
   no strict 'refs';
   tb_printf(0, $y++, &{$attr}(), 0, 'attr=%s', $attr);
 }
 
 my $got = screencap { tb_present() };
-
-tb_shutdown();
-
 my $expected = do { local $/; <DATA> };
-
 is($got, $expected, 'out matches expected data');
 
 done_testing;

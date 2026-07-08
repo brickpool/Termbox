@@ -4,9 +4,7 @@ use warnings;
 use Test::More;
 
 use Termbox::PP;
-use Termbox qw( :api :color );
-
-use constant MAX_INT => ~0 >> 1;
+use Termbox qw( :api );
 
 sub screencap (&) {
   my ($code) = @_;
@@ -29,17 +27,12 @@ plan skip_all => 'Author testing disabled'
 
 tb_init();
 
-my $w = tb_width(); 
-my $h = tb_height();
-
 plan skip_all => 'This test requires a usable terminal'
-  if $w <= 0 || $h <= 0;
+  if tb_width() <= 0 || tb_height() <= 0;
 
-# try to set a cell out of bounds
-my $err = tb_set_cell(MAX_INT, MAX_INT, 'x', 0, 0);
-my $errmsg = tb_strerror($err);
-
-tb_printf(0, 0, 0, 0, "oob err=%d errmsg=%s", $err, $errmsg);
+my $y = 0;
+tb_print_ex(0, $y++, 0, 0, undef, "foo\xc2\x00password"); # stop at NUL
+tb_set_cell(0, $y++, 0xffff, 0, 0); # invalid codepoint
 
 my $got = screencap { tb_present() };
 my $expected = do { local $/; <DATA> };
@@ -48,4 +41,5 @@ is($got, $expected, 'out matches expected data');
 done_testing;
 
 __DATA__
-#5[0moob err=-9 errmsg=Out of bounds[0m
+#5[0mfoo#[0m
+#5[0m#[0m

@@ -11,6 +11,9 @@
 #   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
+package Termbox::PP;
+use strict; 
+use warnings;
 package    # hide from PAUSE
   Termbox; ## no_index
 
@@ -25,7 +28,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.4.4');
+our $VERSION = version->declare('v0.4.5');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -1491,7 +1494,7 @@ sub tb_init_file {    # $int ($path)
 
 sub tb_init_fd {    # $int ($ttyfd)
   state $sig = compile(
-    _PositiveOrZeroInt,
+    _Int,
   );
   my ($ttyfd) = $sig->(@_);
   return tb_init_rwfd($ttyfd, $ttyfd);
@@ -1499,8 +1502,8 @@ sub tb_init_fd {    # $int ($ttyfd)
 
 sub tb_init_rwfd {    # $int ($rfd, $wfd)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
   );
   my ($rfd, $wfd) = $sig->(@_);
 
@@ -1682,8 +1685,8 @@ sub tb_invalidate {    # $int ()
 
 sub tb_set_cursor {    # $int ($cx, $cy)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
   );
   my ($cx, $cy) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1727,8 +1730,8 @@ sub tb_hide_cursor {   # $int ()
 
 sub tb_set_cell {    # $int ($x, $y, $ch, $fg, $bg)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _Str,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
@@ -1740,8 +1743,8 @@ sub tb_set_cell {    # $int ($x, $y, $ch, $fg, $bg)
 
 sub tb_set_cell_ex {    # $int ($x, $y, $ch, $nch, $fg, $bg)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _Str,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
@@ -1762,8 +1765,8 @@ sub tb_set_cell_ex {    # $int ($x, $y, $ch, $nch, $fg, $bg)
 
 sub tb_extend_cell {    # $int ($x, $y, $ch)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _Str,
   );
   my ($x, $y, $ch) = $sig->(@_);
@@ -1783,10 +1786,10 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
 # Return a reference to the cell at the specified position
 #
 
-sub tb_get_cell {    # $cell ($x, $y, $back, $cell)
+sub tb_get_cell {    # $int ($x, $y, $back, \$cell)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _Bool,
     _Ref,
   );
@@ -1801,7 +1804,7 @@ sub tb_get_cell {    # $cell ($x, $y, $back, $cell)
 
 sub tb_set_input_mode {    # $int ($mode)
   state $sig = compile(
-    _PositiveOrZeroInt,
+    _Int,
   );
   my ($mode) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1833,7 +1836,7 @@ sub tb_set_input_mode {    # $int ($mode)
 
 sub tb_set_output_mode {    # $int ($mode)
   state $sig = compile(
-    _PositiveOrZeroInt,
+    _Int,
   );
   my ($mode) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
@@ -1902,8 +1905,8 @@ sub tb_get_fds {      # $int (\$ttyfd, \$resizefd)
 
 sub tb_print {    # $int ($x, $y, $fg, $bg, $str)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
     _Str,
@@ -1912,10 +1915,22 @@ sub tb_print {    # $int ($x, $y, $fg, $bg, $str)
   return tb_print_ex($x, $y, $fg, $bg, undef, $str);
 }
 
+sub tb_printf {    # $int ($x, $y, $fg, $bg, $fmt, @args)
+  state $sig = compile(
+    _Int,
+    _Int,
+    _PositiveOrZeroInt,
+    _PositiveOrZeroInt,
+    _Str,
+  );
+  my ($x, $y, $fg, $bg, $fmt, @args) = ($sig->(@_[0..4]), @_[5..$#_]);
+  return tb_print_ex($x, $y, $fg, $bg, undef, $fmt, @args);
+}
+
 sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
     _Maybe[_ScalarRef],
@@ -1982,19 +1997,7 @@ sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
   return TB_OK;
 }
 
-sub tb_printf {    # $int ($x, $y, $fg, $bg, $fmt, @args)
-  state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
-    _Str,
-  );
-  my ($x, $y, $fg, $bg, $fmt, @args) = ($sig->(@_[0..4]), @_[5..$#_]);
-  return tb_print_ex($x, $y, $fg, $bg, undef, $fmt, @args);
-}
-
-sub tb_printf_ex {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
+sub tb_printf_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $fmt, @args)
   goto &tb_printf_inner;
 }
 
@@ -2026,9 +2029,9 @@ sub tb_sendf {   # $int ($fmt, @args)
 # Set custom callbacks for escape sequence parsing
 #
 
-sub tb_set_func {
+sub tb_set_func {    # $int ($fn_type, $fn)
   state $sig = compile(
-    _PositiveOrZeroInt,
+    _Int,
     _CodeRef,
   );
   my ($fn_type, $fn) = $sig->(@_);
@@ -2335,10 +2338,10 @@ sub tb_reset {    # $int ()
   return TB_OK;
 }
 
-sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w, $fmt, @args)
+sub tb_printf_inner {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $fmt, @args)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _PositiveOrZeroInt,
     _PositiveOrZeroInt,
     _Maybe[_ScalarRef],
@@ -2735,11 +2738,11 @@ sub load_builtin_caps {    # $int ()
 
 sub get_terminfo_string {    # $str|undef ($offsets_pos, $offsets_len, $table_pos, $table_size, $index)
   state $sig = compile(
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
+    _Int,
+    _Int,
+    _Int,
   );
   my ($offsets_pos, $offsets_len, $table_pos, $table_size, $index) = $sig->(@_);
 
@@ -2950,7 +2953,6 @@ sub init_cap_trie {    # $int ()
   return TB_OK;
 }
 
-# Regex/prefix equivalent of termbox2's cap_trie_add.
 sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
   state $sig = compile(
     _Maybe[_Str],
@@ -2962,13 +2964,12 @@ sub cap_trie_add {    # $int ($cap|undef, $key, $mod)
   return $trie->add($cap, $key, $mod);
 }
 
-# Regex/prefix equivalent of termbox2's cap_trie_find.
 # Returns a hash-ref node in $$last with {is_leaf,key,mod,nchildren,cap}.
 sub cap_trie_find {    # $int ($buf|undef, $nbuf, \$last, \$depth)
   state $sig = compile(
     _Maybe[_Str],
     _PositiveOrZeroInt,
-    _ScalarRef,
+    _Ref,
     _ScalarRef,
   );
   my ($buf, $nbuf, $last, $depth) = $sig->(@_);
@@ -2988,7 +2989,7 @@ sub cap_trie_deinit {    # $int ($node)
 # Event extraction helpers
 #
 
-sub wait_event {
+sub wait_event {    # $int ($event, $timeout)
   state $sig = compile(
     _Object,
     _Int,
@@ -3070,7 +3071,7 @@ sub wait_event {
   } #/ alias:
 }
 
-sub extract_event {   # $int ($event)
+sub extract_event {    # $int ($event)
   state $sig = compile(
     _Object,
   );
@@ -3356,7 +3357,7 @@ sub extract_esc_mouse {    # $int ($event)
   } #/ alias:
 }
 
-sub extract_esc_cap {
+sub extract_esc_cap {    # $int ($event)
   state $sig = compile(
     _Object,
   );
@@ -3487,8 +3488,8 @@ sub cellbuf_clear {    # $int ($c)
 sub cellbuf_get {    # $int ($c, $x, $y, \$out)
   state $sig = compile(
     _Object,
-    _PositiveOrZeroInt,
-    _PositiveOrZeroInt,
+    _Int,
+    _Int,
     _Ref,
   );
   my ($c, $x, $y, $out) = $sig->(@_);
@@ -3511,7 +3512,7 @@ sub cellbuf_resize {    # $int ($c, $w, $h)
 
 sub send_literal {   # $int ($rv, $a)
   state $sig = compile(
-    _PositiveOrZeroInt,
+    _Int,
     _Str,
   );
   my ($rv, $a) = $sig->(@_);
@@ -3521,7 +3522,7 @@ sub send_literal {   # $int ($rv, $a)
 
 sub send_num {   # $int ($rv, \$buf, $n)
   state $sig = compile(
-    _PositiveOrZeroInt,
+    _Int,
     _ScalarRef,
     _PositiveOrZeroInt,
   );

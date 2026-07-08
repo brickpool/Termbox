@@ -1,12 +1,11 @@
 use strict;
 use warnings;
+use utf8;
 
 use Test::More;
 
 use Termbox::PP;
-use Termbox qw( :api :color );
-
-use constant MAX_INT => ~0 >> 1;
+use Termbox qw( :api );
 
 sub screencap (&) {
   my ($code) = @_;
@@ -27,19 +26,16 @@ sub screencap (&) {
 plan skip_all => 'Author testing disabled' 
   if !$ENV{AUTHOR_TESTING};
 
+plan skip_all => 'This will only work with extended grapheme cluster support'
+  if tb_has_egc();
+
 tb_init();
 
-my $w = tb_width(); 
-my $h = tb_height();
-
 plan skip_all => 'This test requires a usable terminal'
-  if $w <= 0 || $h <= 0;
+  if tb_width() <= 0 || tb_height() <= 0;
 
-# try to set a cell out of bounds
-my $err = tb_set_cell(MAX_INT, MAX_INT, 'x', 0, 0);
-my $errmsg = tb_strerror($err);
-
-tb_printf(0, 0, 0, 0, "oob err=%d errmsg=%s", $err, $errmsg);
+tb_print(0, 0, 0, 0, "STARG\xce\x9b\xcc\x8aTE SG-1");
+tb_print(0, 1, 0, 0, "a = v\xcc\x87 = r\xcc\x88, a\xe2\x83\x91 \xe2\x8a\xa5 b\xe2\x83\x91");
 
 my $got = screencap { tb_present() };
 my $expected = do { local $/; <DATA> };
@@ -48,4 +44,5 @@ is($got, $expected, 'out matches expected data');
 done_testing;
 
 __DATA__
-#5[0moob err=-9 errmsg=Out of bounds[0m
+#5[0mSTARGΛ̊TE SG-1[0m
+#5[0ma = v̇ = r̈, a⃑ ⊥ b⃑[0m

@@ -4,7 +4,7 @@ use warnings;
 use Test::More;
 
 use Termbox::PP;
-use Termbox qw( :api :return :color );
+use Termbox qw( :api :color );
 
 sub xvkbd {
   my ($xvkbd_cmd) = @_;
@@ -42,11 +42,11 @@ plan skip_all => 'Author testing disabled'
 
 tb_init();
 
-plan skip_all => 'This test requires a usable terminal'
-  if tb_width() <= 0 || tb_height() <= 0;
-
 my $w = tb_width();
 my $h = tb_height();
+
+plan skip_all => 'This test requires a usable terminal'
+  if $w <= 0 || $h <= 0;
 
 my $bg = TB_BLACK;
 my $red = TB_RED;
@@ -64,7 +64,7 @@ for my $attr (qw(TB_BOLD TB_UNDERLINE TB_ITALIC TB_REVERSE TB_BRIGHT TB_DIM)) {
   tb_printf(0, $y++, $blue | &{$attr}(), $bg, "attr=%s", $attr);
 }
 
-xvkbd("\Ca");    # Ctrl-A
+xvkbd("\cA");    # Ctrl-A
 
 my $event = Termbox::Event->new();
 my $rv = tb_peek_event($event, 1000);
@@ -86,11 +86,7 @@ tb_printf_ex(0, $y++, $blue, $bg, \$out_w, "event rv=%d type=%d mod=%d key=%d ".
 tb_printf(0, $y++, 0, 0, "out_w=%d", $out_w);
 
 my $got = screencap { tb_present() };
-
-tb_shutdown();
-
 my $expected = do { local $/; <DATA> };
-
 is($got, $expected, 'out matches expected data');
 
 done_testing;

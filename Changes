@@ -1,5 +1,13 @@
 Revision history for Termbox
 
+0.004005
+        2026-07-10
+        - Fix POD type definitions
+        - Align subroutine call signatures closer to C implementation
+        - Normalize version numbers of builtin modules for consistency
+        - Add strict and warnings to all modules
+        - Add additional eXTended tests to the package
+
 0.004004
         2026-07-07
         - Fix on older Perl versions where Unicode::UCD::prop_invmap is not available

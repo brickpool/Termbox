@@ -54,3 +54,11 @@ xt/01_pod.t
 xt/test_64bit.t
 xt/test_basic.t
 xt/test_error.t
+xt/test_invalid_utf8.t
+xt/test_invalidate.t
+xt/test_non_printable.t
+xt/test_non_spacing_mark.t
+xt/test_output_mode.t
+xt/test_print.t
+xt/test_resize.t
+xt/test_set_get.t
