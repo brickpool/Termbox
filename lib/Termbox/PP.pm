@@ -28,7 +28,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.4.5');
+our $VERSION = version->declare('v0.4.6');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -1249,7 +1249,7 @@ $global = {
   ttyfd       => -1,
   rfd         => -1,
   wfd         => -1,
-  ttyfd_open  => -1,
+  ttyfd_open  => undef,
   resize_pipefd => [-1, -1],
 
   # Terminal state
@@ -1488,7 +1488,7 @@ sub tb_init_file {    # $int ($path)
     return TB_ERR_INIT_OPEN;
   }
 
-  $global->{ttyfd_open} = 1;
+  $global->{ttyfd_open} = IO::File->new_from_fd($ttyfd, '+<');
   return tb_init_fd($ttyfd);
 }
 
@@ -1660,7 +1660,7 @@ sub tb_present {    # $int ()
 
   $rv = send_cursor_if($global->{cursor_x}, $global->{cursor_y});
   return $rv if $rv != TB_OK;
-  $rv = bytebuf_flush(\$global->{out}, $global->{wfd});
+  $rv = bytebuf_flush(\$global->{outbuf}, $global->{wfd});
   return $rv if $rv != TB_OK;
 
   return TB_OK;
@@ -1696,7 +1696,7 @@ sub tb_set_cursor {    # $int ($cx, $cy)
 
   my $rv;
   if ($global->{cursor_x} == -1) {
-    $rv = bytebuf_puts(\$global->{out}, $global->{caps}[TB_CAP_SHOW_CURSOR]);
+    $rv = bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_SHOW_CURSOR]);
     return $rv if $rv != TB_OK;
   }
   $rv = send_cursor_if($cx, $cy);
@@ -1714,7 +1714,7 @@ sub tb_hide_cursor {   # $int ()
   return TB_ERR_NOT_INIT unless $global->{initialized};
 
   if ($global->{cursor_x} >= 0) {
-    my $rv = bytebuf_puts(\$global->{out}, $global->{caps}[TB_CAP_HIDE_CURSOR]);
+    my $rv = bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_HIDE_CURSOR]);
     return $rv if $rv != TB_OK;
   }
 
@@ -1924,7 +1924,7 @@ sub tb_printf {    # $int ($x, $y, $fg, $bg, $fmt, @args)
     _Str,
   );
   my ($x, $y, $fg, $bg, $fmt, @args) = ($sig->(@_[0..4]), @_[5..$#_]);
-  return tb_print_ex($x, $y, $fg, $bg, undef, $fmt, @args);
+  return tb_printf_inner($x, $y, $fg, $bg, undef, $fmt, @args);
 }
 
 sub tb_print_ex {    # $int ($x, $y, $fg, $bg, \$out_w|undef, $str)
@@ -2053,7 +2053,6 @@ sub tb_set_func {    # $int ($fn_type, $fn)
 
   return TB_ERR;
 }
-
 
 #
 # UTF-8 utility functions
@@ -2290,8 +2289,7 @@ sub tb_reset {    # $int ()
   state $sig = compile();
   $sig->(@_);
 
-  # Keep tty ownership flag, reset everything else like termbox2.
-  my $ttyfd_open = $global->{ttyfd_open} // -1;
+  my $ttyfd_open = $global->{ttyfd_open};
   $global = {
     ttyfd         => -1,
     rfd           => -1,
@@ -2376,8 +2374,8 @@ sub tb_deinit {    # $int ()
       $global->{orig_tios}->setattr($global->{ttyfd}, TCSAFLUSH);
     }
     if ($global->{ttyfd_open}) {
-      POSIX::close($global->{ttyfd});
-      $global->{ttyfd_open} = 0;
+      close($global->{ttyfd_open});
+      $global->{ttyfd_open} = undef;
       $global->{ttyfd} = -1;
     }
   }
@@ -2400,6 +2398,8 @@ sub tb_deinit {    # $int ()
   tb_reset();
   return TB_OK;
 }
+
+END { tb_deinit() if $global->{initialized} }
 
 sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
   state $sig = compile(
@@ -3000,7 +3000,6 @@ sub wait_event {    # $int ($event, $timeout)
   my $buf = '';
   state $empty_event = Termbox::Event->new();
 
-  alias: for ($event) {
   %$event = %$empty_event;
 
   # Fast path: buffered input already yields a full event
@@ -3068,7 +3067,6 @@ sub wait_event {    # $int ($event, $timeout)
   } while ($timeout < 0);
 
   return $rv;
-  } #/ alias:
 }
 
 sub extract_event {    # $int ($event)
@@ -3512,23 +3510,27 @@ sub cellbuf_resize {    # $int ($c, $w, $h)
 
 sub send_literal {   # $int ($rv, $a)
   state $sig = compile(
-    _Int,
+    _Maybe[_Int],
     _Str,
   );
   my ($rv, $a) = $sig->(@_);
+  alias: for $rv ($_[0]) {
   $global->{outbuf} .= $a;
-  return TB_OK;
+  return $rv = TB_OK;
+  } #/ alias:
 }
 
 sub send_num {   # $int ($rv, \$buf, $n)
   state $sig = compile(
-    _Int,
+    _Maybe[_Int],
     _ScalarRef,
     _PositiveOrZeroInt,
   );
   my ($rv, $buf, $n) = $sig->(@_);
+  alias: for $rv ($_[0]) {
   $global->{outbuf} .= sprintf('%u', $n);
-  return TB_OK;
+  return $rv = TB_OK;
+  } #/ alias:
 }
 
 sub send_init_escape_codes {   # $int ()
@@ -3577,7 +3579,7 @@ sub send_attr {    # $int ($fg, $bg)
     return TB_OK;
   }
 
-  $rv = bytebuf_puts($global->{outbuf}, $global->{caps}[TB_CAP_SGR0]);
+  $rv = bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_SGR0]);
   return $rv if $rv != TB_OK;
 
   my ($cfg, $cbg);
@@ -3714,60 +3716,60 @@ sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
   switch: for ($global->{output_mode}) {
     DEFAULT:
     case: TB_OUTPUT_NORMAL == $_ and do {
-      send_literal($rv, "\x1b[");
+      send_literal($rv, "\x1b[")                    == TB_OK or return $rv;
       if (!$fg_is_default) {
-        send_num($rv, \$nbuf, $cfg);
+        send_num($rv, \$nbuf, $cfg)                 == TB_OK or return $rv;
         if (!$bg_is_default) {
-          send_literal($rv, ";");
+          send_literal($rv, ";")                    == TB_OK or return $rv;
         }
       }
       if (!$bg_is_default) {
-        send_num($rv, \$nbuf, $cbg);
+        send_num($rv, \$nbuf, $cbg)                 == TB_OK or return $rv;
       }
-      send_literal($rv, "m");
+      send_literal($rv, "m")                        == TB_OK or return $rv;
       last;
     };
     case: TB_OUTPUT_256       == $_ ||
           TB_OUTPUT_216       == $_ ||
           TB_OUTPUT_GRAYSCALE == $_ and do 
     {
-      send_literal($rv, "\x1b[");
+      send_literal($rv, "\x1b[")                    == TB_OK or return $rv;
       if (!$fg_is_default) {
-        send_literal($rv, "38;5;");
-        send_num($rv, \$nbuf, $cfg);
+        send_literal($rv, "38;5;")                  == TB_OK or return $rv;
+        send_num($rv, \$nbuf, $cfg)                 == TB_OK or return $rv;
         if (!$bg_is_default) {
-          send_literal($rv, ";");
+          send_literal($rv, ";")                    == TB_OK or return $rv;
         }
       }
       if (!$bg_is_default) {
-        send_literal($rv, "48;5;");
-        send_num($rv, \$nbuf, $cbg);
+        send_literal($rv, "48;5;")                  == TB_OK or return $rv;
+        send_num($rv, \$nbuf, $cbg)                 == TB_OK or return $rv;
       }
-      send_literal($rv, "m");
+      send_literal($rv, "m")                        == TB_OK or return $rv;
       last;
     };
     case: TB_OPT_ATTR_W >= 32 && TB_OUTPUT_TRUECOLOR == $_ and do {
-      send_literal($rv, "\x1b[");
+      send_literal($rv, "\x1b[")                    == TB_OK or return $rv;
       if (!$fg_is_default) {
-        send_literal($rv, "38;2;");
-        send_num($rv, \$nbuf, ($cfg >> 16) & 0xff);
-        send_literal($rv, ";");
-        send_num($rv, \$nbuf, ($cfg >> 8) & 0xff);
-        send_literal($rv, ";");
-        send_num($rv, \$nbuf, $cfg & 0xff);
+        send_literal($rv, "38;2;")                  == TB_OK or return $rv;
+        send_num($rv, \$nbuf, ($cfg >> 16) & 0xff)  == TB_OK or return $rv;
+        send_literal($rv, ";")                      == TB_OK or return $rv;
+        send_num($rv, \$nbuf, ($cfg >> 8) & 0xff)   == TB_OK or return $rv;
+        send_literal($rv, ";")                      == TB_OK or return $rv;
+        send_num($rv, \$nbuf, $cfg & 0xff)          == TB_OK or return $rv;
         if (!$bg_is_default) {
-          send_literal($rv, ";");
+          send_literal($rv, ";")                    == TB_OK or return $rv;
         }
       }
       if (!$bg_is_default) {
-        send_literal($rv, "48;2;");
-        send_num($rv, \$nbuf, ($cbg >> 16) & 0xff);
-        send_literal($rv, ";");
-        send_num($rv, \$nbuf, ($cbg >> 8) & 0xff);
-        send_literal($rv, ";");
-        send_num($rv, \$nbuf, $cbg & 0xff);
+        send_literal($rv, "48;2;")                  == TB_OK or return $rv;
+        send_num($rv, \$nbuf, ($cbg >> 16) & 0xff)  == TB_OK or return $rv;
+        send_literal($rv, ";")                      == TB_OK or return $rv;
+        send_num($rv, \$nbuf, ($cbg >> 8) & 0xff)   == TB_OK or return $rv;
+        send_literal($rv, ";")                      == TB_OK or return $rv;
+        send_num($rv, \$nbuf, $cbg & 0xff)          == TB_OK or return $rv;
       }
-      send_literal($rv, "m");
+      send_literal($rv, "m")                        == TB_OK or return $rv;
       last;
     };
     default: {
@@ -3787,11 +3789,11 @@ sub send_cursor_if {    # $int ($x, $y)
   my $rv;
   my $nbuf = '';
   return TB_OK if $x < 0 || $y < 0;
-  send_literal($rv, "\x1b[");
-  send_num($rv, \$nbuf, $y + 1);
-  send_literal($rv, ";");
-  send_num($rv, \$nbuf, $x + 1);
-  send_literal($rv, "H");
+  send_literal($rv, "\x1b[")                        == TB_OK or return $rv;
+  send_num($rv, \$nbuf, $y + 1)                     == TB_OK or return $rv;
+  send_literal($rv, ";")                            == TB_OK or return $rv;
+  send_num($rv, \$nbuf, $x + 1)                     == TB_OK or return $rv;
+  send_literal($rv, "H")                            == TB_OK or return $rv;
   return TB_OK;
 }
 

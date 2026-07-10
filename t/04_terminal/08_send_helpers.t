@@ -25,10 +25,10 @@ sub valid_preinit_status {
 subtest 'pre-init status checks' => sub {
   plan tests => 7;
 
-  my $rv = Termbox::send_literal(0, "foo");
+  Termbox::send_literal(my $rv, "foo");
   ok(valid_preinit_status($rv), 'send_literal pre-init returns expected');
 
-  $rv = Termbox::send_num(0, \my $buf, 42);
+  Termbox::send_num($rv, \my $buf, 42);
   ok(valid_preinit_status($rv), 'send_num pre-init returns expected');
 
   $rv = eval { Termbox::send_init_escape_codes() } // TB_ERR;
@@ -63,12 +63,12 @@ subtest 'send_* APIs after init' => sub {
 
   plan tests => 8;
 
-  my $rv = Termbox::send_literal(0, "foo");
+  Termbox::send_literal(my $rv, "foo");
   is($rv, TB_OK(), 'send_literal after init returns TB_OK');
   like($Termbox::global->{outbuf}, qr/foo/, 'send_literal appends to outbuf');
 
   $Termbox::global->{outbuf} = '';
-  $rv = Termbox::send_num(0, \my $buf, 123);
+  Termbox::send_num($rv, \my $buf, 123);
   is($rv, TB_OK(), 'send_num after init returns TB_OK');
   like($Termbox::global->{outbuf}, qr/123/, 'send_num appends number to outbuf');
 

@@ -19,6 +19,7 @@ subtest 'tb_present basic render pass' => sub {
 
   # Mock cellbuf and output to verify tb_present
   my @calls;
+  my $flushed_buffer = '';
   no warnings 'redefine';
   local *Termbox::cellbuf_get = sub {
     my ($buf, $x, $y, $out) = @_;
@@ -52,7 +53,7 @@ subtest 'tb_present basic render pass' => sub {
   local $Termbox::global->{initialized} = 1;
   local $Termbox::global->{front}       = cellbuf->new();
   local $Termbox::global->{back}        = cellbuf->new();
-  local $Termbox::global->{out}         = '';
+  local $Termbox::global->{outbuf}      = '';
   $Termbox::global->{front}->init(1, 1);
   $Termbox::global->{back}->init(1, 1);
 

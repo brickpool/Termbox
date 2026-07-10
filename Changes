@@ -1,5 +1,13 @@
 Revision history for Termbox
 
+0.004006
+        2026-07-13
+        - Terminal: keep a live filehandle so that the assigned fd stays reliable
+        - Terminal: restore tty state through the open filehandle during shutdown
+        - Fix: route tb_printf through tb_printf_inner
+        - Fix: use global->{outbuf} consistently
+        - API: first argument for send_literal and send_num can be undefined
+
 0.004005
         2026-07-10
         - Fix POD type definitions

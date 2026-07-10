@@ -2,6 +2,7 @@ bin/build_wcwidth_tables.pl
 bin/DerivedGeneralCategory.txt
 bin/EastAsianWidth.txt
 Changes
+example/10print.pl
 example/hello_world.pl
 lib/Termbox/PP.pm
 lib/Termbox/PP.pod
