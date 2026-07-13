@@ -28,7 +28,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.4.6');
+our $VERSION = version->declare('v0.4.7');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -42,15 +42,12 @@ require bytes;
 use Carp ();
 use Config;
 use IO::File ();
-use Params::Check qw( check );
+use Params::Check ();
 use POSIX qw(
   :errno_h
   :termios_h
 );
-use Scalar::Util qw(
-  looks_like_number
-  blessed
-);
+use Scalar::Util qw( blessed );
 use Unicode::UCD ();
 use utf8;
 
@@ -90,9 +87,10 @@ use constant TB_OPT_READ_BUF => exists $ENV{TB_OPT_READ_BUF}
 use constant TB_OPT_LIBC_WCHAR => !!(
     (exists $ENV{TB_OPT_LIBC_WCHAR} ? $ENV{TB_OPT_LIBC_WCHAR} : 1)
   && Unicode::UCD->can('prop_invmap')
+  && Unicode::UCD->can('search_invlist')
 );
 
-use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? $ENV{PATH_MAX} : 4096;
+use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? 0+$ENV{PATH_MAX} : 4096;
 
 use constant TB_TERMINFO_DIR => exists $ENV{TB_TERMINFO_DIR} 
   ? ''.$ENV{TB_TERMINFO_DIR}
@@ -3584,7 +3582,7 @@ sub send_attr {    # $int ($fg, $bg)
 
   my ($cfg, $cbg);
   switch: for ($global->{output_mode}) {
-    DEFAULT:
+    DEFAULT: do {};
     case: TB_OUTPUT_NORMAL == $_ and do {
       # The minus 1 below is because our colors are 1-indexed starting
       # from black. Black is represented by a 30, 40, 90, or 100 for fg,
@@ -3714,7 +3712,7 @@ sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
   return TB_OK if $fg_is_default && $bg_is_default;
 
   switch: for ($global->{output_mode}) {
-    DEFAULT:
+    DEFAULT: do {};
     case: TB_OUTPUT_NORMAL == $_ and do {
       send_literal($rv, "\x1b[")                    == TB_OK or return $rv;
       if (!$fg_is_default) {

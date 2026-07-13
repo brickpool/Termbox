@@ -1,7 +1,12 @@
 Revision history for Termbox
 
-0.004006
+0.004007
         2026-07-13
+        - Fix missing Unicode::UCD::search_invlist on older Perl
+        - Fix Perl 5.10 syntax error with consecutive labels (DEFAULT:/case:)
+
+0.004006
+        2026-07-12
         - Terminal: keep a live filehandle so that the assigned fd stays reliable
         - Terminal: restore tty state through the open filehandle during shutdown
         - Fix: route tb_printf through tb_printf_inner
