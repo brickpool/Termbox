@@ -1,5 +1,14 @@
 Revision history for Termbox
 
+0.005000
+        2026-07-17
+        - Terminal: add Windows Virtual Terminal support (again)
+        - Change default wcwidth backend to builtin-based version
+        - Fix escape sequence handling in extract_event (correct TB_ERR propagation)
+        - Fix use :colors (as FFI) instead of :color when importing constants
+        - Improve Unicode::UCD backend (long property names, emoji fallback)
+        - Optimize tb_present by removing accessor overhead and inlining logic
+
 0.004007
         2026-07-13
         - Fix missing Unicode::UCD::search_invlist on older Perl

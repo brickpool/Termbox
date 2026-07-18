@@ -51,7 +51,7 @@ subtest 'pre-init status checks' => sub {
 };
 
 subtest 'send_* APIs after init' => sub {
-  $Termbox::global->{initialized} = 1;
+  local $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
   $Termbox::global->{outbuf} = '';

@@ -4,10 +4,12 @@ use warnings;
 
 use Test::More;
 
-BEGIN {
-  require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :api :return );
+if ($^O eq 'MSWin32') {
+  plan skip_all => 'Not available on Windows';
 }
+
+require_ok 'Termbox::PP';
+use_ok 'Termbox', qw( :api :return );
 
 # -----------------------------------------------
 note 'Get fds that can be used with poll/select';

@@ -1,5 +1,6 @@
 #!perl
 use 5.010;
+use strict;
 use warnings;
 
 use Getopt::Long qw( GetOptions );
@@ -15,7 +16,7 @@ sub OnLeavingScope::DESTROY { ${$_[0]}->() }
 sub main { # $ ()
   my $rv = Termbox::tb_init();
   return $rv if $rv != Termbox::TB_OK;
-  my $defer = bless \\&Termbox::shutdown, 'OnLeavingScope';
+  my $defer = bless \\&Termbox::tb_shutdown, 'OnLeavingScope';
 
   my $w = Termbox::tb_width();
   my $h = Termbox::tb_height();
@@ -23,7 +24,7 @@ sub main { # $ ()
     for (my $x = 0; $x < min(40, $w); $x++) {
       Termbox::tb_set_cell($x, $y, chr(9585.5+rand), Termbox::TB_WHITE, 
         Termbox::TB_BLUE | Termbox::TB_BOLD);
-      Termbox::present();
+      Termbox::tb_present();
     }
   }
 

@@ -48,7 +48,7 @@ subtest 'pre-init status checks' => sub {
 };
 
 subtest 'set-cell APIs after init' => sub {
-  $Termbox::global->{initialized} = 1;
+  local $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
 
@@ -56,7 +56,7 @@ subtest 'set-cell APIs after init' => sub {
   plan skip_all => 'init_cellbuf failed in this environment'
     if $rv != TB_OK();
 
-  plan tests => 9;
+  plan tests => 11;
 
   $rv = tb_set_cell(0, 0, 'A', 0, 0);
   is($rv, TB_OK(), 'tb_set_cell writes one codepoint');
@@ -66,23 +66,33 @@ subtest 'set-cell APIs after init' => sub {
     local $SIG{__WARN__} = sub { };
     $cells = tb_cell_buffer();
   }
-  is($cells->[0]->{ch}, 'A', 'tb_set_cell stores expected text');
+  is($cells->[0]->ch, ord('A'), 'tb_set_cell stores expected text');
 
   $rv = tb_set_cell_ex(0, 0, pack('U*', ord('A'), 0x0301), 2, 0, 0);
   is($rv, TB_OK(), 'tb_set_cell_ex writes a cluster');
-  is($cells->[0]->{ch}, "A\x{0301}", 'tb_set_cell_ex stores combined grapheme');
+  is($cells->[0][0], "A\x{0301}", 'tb_set_cell_ex stores combined grapheme');
+  is_deeply(
+    $cells->[0]->ech, 
+    [ ord('A'), 0x0301 ], 
+    'tb_set_cell_ex stores expected codepoints'
+  );
 
   $rv = tb_extend_cell(0, 0, chr 0x0327);
   is($rv, TB_OK(), 'tb_extend_cell appends one codepoint');
   is(
-    $cells->[0]->{ch},
+    $cells->[0][0],
     "A\x{0301}\x{0327}",
     'tb_extend_cell appends to existing grapheme'
+  );
+  is_deeply(
+    $cells->[0]->ech, 
+    [ ord('A'), 0x0301, 0x0327 ], 
+    'tb_set_cell_ex appends expected codepoints'
   );
 
   $rv = tb_set_cell_ex(0, 0, '', 0, 0, 0);
   is($rv, TB_OK(), 'tb_set_cell_ex accept empty cluster');
-  is($cells->[0]->{ch}, "\0", 
+  is($cells->[0]->ch, 0, 
     'tb_set_cell_ex with empty cluster sets cell to null character');
   {
     local $SIG{__WARN__} = sub { };
@@ -103,8 +113,8 @@ subtest 'tb_get_cell basic behaviour' => sub {
 
   # initialized
   local $Termbox::global->{initialized} = 1;
-  local $Termbox::global->{front}       = cellbuf->new();
-  local $Termbox::global->{back}        = cellbuf->new();
+  $Termbox::global->{front} = cellbuf->new();
+  $Termbox::global->{back} = cellbuf->new();
   $Termbox::global->{front}->init(2, 2);
   $Termbox::global->{back}->init(2, 2);
   is(

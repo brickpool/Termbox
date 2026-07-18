@@ -3,8 +3,6 @@ use warnings;
 
 use ExtUtils::MakeMaker;
 
-die "OS unsupported\n" if $^O eq 'MSWin32';
-
 WriteMakefile1(
   NAME              => 'Termbox::PP',
   VERSION_FROM      => 'lib/Termbox/PP.pm',
@@ -50,7 +48,9 @@ WriteMakefile1(
           'Carp'            => 0,
           'constant'        => 0,
 #          'Config'          => 0,
+#          'Errno'           => 0,
           'Exporter'        => 0,
+#          'Fcntl'           => 0,
           'IO::File'        => 0,
           'Params::Check'   => 0,
           'Scalar::Util'    => 0,
@@ -93,6 +93,13 @@ sub WriteMakefile1 { # void (%params)
   my %params = @_;
   my $eumm_version = $ExtUtils::MakeMaker::VERSION;
   $eumm_version = eval $eumm_version;
+
+  if ($^O eq 'MSWin32') {
+    # $params{PREREQ_PM}->{'Win32'}           = 0;
+    $params{PREREQ_PM}->{'Win32::Console'}  = 0.10;
+    $params{PREREQ_PM}->{'Win32::API'}      = 0.75;
+    $params{PREREQ_PM}->{'Win32API::File'}  = 0.1201;
+  }
 
   if ($params{TEST_REQUIRES} and $eumm_version < 6.6303) {
     $params{BUILD_REQUIRES} = {

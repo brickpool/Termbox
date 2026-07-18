@@ -6,7 +6,7 @@ use Test::More;
 
 BEGIN {
   require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :api :return :color );
+  use_ok 'Termbox', qw( :api :return :colors );
 }
 
 sub valid_preinit_status {
@@ -36,7 +36,7 @@ subtest 'pre-init status checks' => sub {
 };
 
 subtest 'clear and set_clear_attrs after init' => sub {
-  $Termbox::global->{initialized} = 1;
+  local $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
 

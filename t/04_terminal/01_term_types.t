@@ -24,9 +24,9 @@ subtest 'Termbox::Cell->new' => sub {
   my $cell;
   lives_ok { $cell = Termbox::Cell->new() } 'new() lives';
   isa_ok    $cell, 'Termbox::Cell',  'returns blessed object';
-  is        $cell->{ch}, '', 'ch defaults to empty string';
-  is        $cell->{fg}, 0,  'fg defaults to 0';
-  is        $cell->{bg}, 0,  'bg defaults to 0';
+  is        $cell->ch, 0, 'ch defaults to 0';
+  is        $cell->fg, 0, 'fg defaults to 0';
+  is        $cell->bg, 0, 'bg defaults to 0';
 };
 
 subtest 'Termbox::Cell::set and accessors' => sub {
@@ -35,12 +35,12 @@ subtest 'Termbox::Cell::set and accessors' => sub {
   my $rv;
   lives_ok { $rv = $cell->set('A', 3, 5) } 'set() lives';
   is $rv,         TB_OK(), 'set returns TB_OK';
-  is $cell->{ch}, 'A',     'ch stored as UTF-8 string';
-  is $cell->{fg}, 3,       'fg stored';
-  is $cell->{bg}, 5,       'bg stored';
-  is $cell->ch,   ord('A'), 'ch() returns codepoint';
-  is $cell->fg,   3,        'fg() accessor';
-  is $cell->bg,   5,        'bg() accessor';
+  is $cell->[0], 'A',      'ch stored as UTF-8 string';
+  is $cell->[1], 3,        'fg stored';
+  is $cell->[2], 5,        'bg stored';
+  is $cell->ch,  ord('A'), 'ch() returns codepoint';
+  is $cell->fg,  3,        'fg() accessor';
+  is $cell->bg,  5,        'bg() accessor';
 };
 
 subtest 'Termbox::Cell::set empty ch' => sub {
@@ -48,7 +48,7 @@ subtest 'Termbox::Cell::set empty ch' => sub {
   my $cell = Termbox::Cell->new();
   $cell->set('X', 1, 2);
   is $cell->set('', 0, 0), TB_OK(), 'empty ch accepted';
-  is $cell->{ch}, "\0",             'ch set to "\0" for empty string';
+  is $cell->ch, 0,                  'ch set to 0 for empty string';
 };
 
 subtest 'Termbox::Cell::equal' => sub {
@@ -73,10 +73,10 @@ subtest 'Termbox::Cell::copy' => sub {
   $src->set('M', 5, 3);
   my $rv;
   lives_ok { $rv = $dst->copy($src) } 'copy() lives';
-  is $rv,          TB_OK(), 'copy returns TB_OK';
-  is $dst->{ch},   'M',     'ch copied';
-  is $dst->{fg},   5,       'fg copied';
-  is $dst->{bg},   3,       'bg copied';
+  is $rv,      TB_OK(),  'copy returns TB_OK';
+  is $dst->ch, ord('M'), 'ch copied';
+  is $dst->fg, 5,        'fg copied';
+  is $dst->bg, 3,        'bg copied';
 };
 
 SKIP: {

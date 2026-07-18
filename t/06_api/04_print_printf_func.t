@@ -70,7 +70,7 @@ subtest 'tb_print_ex combining char uses extend path' => sub {
     local $SIG{__WARN__} = sub { };
     $cells = tb_cell_buffer();
   }
-  is($cells->[0]->{ch}, "A\x{0301}", 'cell keeps combined grapheme');
+  is($cells->[0][0], "A\x{0301}", 'cell keeps combined grapheme');
   {
     local $SIG{__WARN__} = sub { };
     is(Termbox::tb_deinit(), TB_OK(), 'tb_deinit succeeds');

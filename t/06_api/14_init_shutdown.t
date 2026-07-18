@@ -11,7 +11,6 @@ BEGIN {
 
 # Mock all internal helpers used by tb_init_rwfd
 no warnings 'redefine';
-local *Termbox::tb_reset               = sub { };
 local *Termbox::init_term_attrs        = sub { TB_OK };
 local *Termbox::init_term_caps         = sub { TB_OK };
 local *Termbox::init_cap_trie          = sub { TB_OK };
@@ -30,34 +29,66 @@ note 'tb_init_rwfd / tb_init_fd / tb_init_file';
 # ----------------------------------------------
 
 subtest 'tb_init_rwfd success path' => sub {
-  plan tests => 5;
+  plan tests => 3;
 
   local $Termbox::global->{initialized} = 0;
+  my @keep_alive;
+
+  my ($in, $out) = (10, 11);
+  if ($^O eq 'MSWin32') {
+    require Fcntl;
+    sysopen(my $fh_in,  'CONIN$',  Fcntl::O_RDWR);
+    sysopen(my $fh_out, 'CONOUT$', Fcntl::O_RDWR);
+    push @keep_alive, $fh_in, $fh_out;
+    $in  = fileno($fh_in);
+    $out = fileno($fh_out);
+  }
 
   is(
-    tb_init_rwfd(10, 11),
+    tb_init_rwfd($in, $out),
     TB_OK,
     'tb_init_rwfd returns TB_OK'
   );
 
+  if ($^O eq 'MSWin32') {
+    require Win32API::File;
+    $in = Win32API::File::FdGetOsFHandle($in);
+    $out = Win32API::File::FdGetOsFHandle($out);
+  }
+
   ok($Termbox::global->{initialized}, 'global initialized set');
-  is($Termbox::global->{rfd}, 10, 'rfd stored');
-  is($Termbox::global->{wfd}, 11, 'wfd stored');
-  is($Termbox::global->{ttyfd}, 10, 'ttyfd resolved via isatty');
+  is_deeply(
+    {
+      rfd   => $Termbox::global->{rfd},
+      wfd   => $Termbox::global->{wfd},
+      ttyfd => $Termbox::global->{ttyfd},
+    },
+    {
+      rfd   => $in,
+      wfd   => $out,
+      ttyfd => $in,
+    },
+    'file descriptors stored correctly'
+  );
 };
 
 subtest 'tb_init_fd delegates to tb_init_rwfd' => sub {
-  plan tests => 2;
+  plan tests => 3;
 
+  is(Termbox::tb_reset(), TB_OK, 'tb_reset returns TB_OK');
   local $Termbox::global->{initialized} = 0;
 
   is(
     tb_init_fd(7),
-    TB_OK,
-    'tb_init_fd returns TB_OK'
+    $^O eq 'MSWin32' ? TB_ERR_WIN_UNSUPPORTED() : TB_OK(),
+    'tb_init_fd returns TB_ERR_WIN_UNSUPPORTED'
   );
 
-  is($Termbox::global->{rfd}, 7, 'rfd == wfd == ttyfd');
+  is(
+    $Termbox::global->{rfd}, 
+    $^O eq 'MSWin32' ? Win32API::File::INVALID_HANDLE_VALUE() : 7,
+    'rfd == wfd == ttyfd'
+  );
 };
 
 subtest 'tb_init_file already initialized' => sub {

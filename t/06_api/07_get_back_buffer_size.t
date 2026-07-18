@@ -14,7 +14,7 @@ note 'Get terminal (buffer) size API';
 # ------------------------------------
 
 subtest 'size functions pre-init status checks' => sub {
-  $Termbox::global->{initialized} = 1;
+  local $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
 

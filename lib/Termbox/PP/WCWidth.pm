@@ -26,7 +26,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v0.1.5');
-our $VERSION = version->declare('v0.4.7');
+our $VERSION = version->declare('v0.5.0');
 
 # authority '...'
 our $authority = 'github:raku-community-modules';
@@ -64,6 +64,18 @@ our %EXPORT_TAGS = (
 );
 
 # ------------------------------------------------------------------------
+# Constants --------------------------------------------------------------
+# ------------------------------------------------------------------------
+
+# STRICT is a global flag that enables strict argument checking.
+use constant STRICT => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
+  PERL_STRICT
+  EXTENDED_TESTING
+  AUTHOR_TESTING
+  RELEASE_TESTING
+);
+
+# ------------------------------------------------------------------------
 # Functions --------------------------------------------------------------
 # ------------------------------------------------------------------------
 
@@ -91,11 +103,11 @@ my %cache = ();
 sub wcwidth {    # $result ($ucs)
   my ($ucs) = @_;
 
-  return -1 unless defined $ucs && !ref $ucs;
-  return -1 unless $ucs =~ /\A[0-9]+\z/;
+  return -1 if STRICT && (!defined $ucs || ref $ucs);
+  return -1 if STRICT && $ucs !~ /\A\d+\z/;
 
   return -1 if $ucs < 0 || $ucs > 0x10ffff;
-  return -1 if $ucs >= 0xD800 && $ucs <= 0xDFFF;
+  return -1 if STRICT && $ucs >= 0xD800 && $ucs <= 0xDFFF;
 
   return $cache{$ucs} if exists $cache{$ucs};
 

@@ -15,34 +15,12 @@ note 'Test tb_present and tb_invalidate';
 # ---------------------------------------
 
 subtest 'tb_present basic render pass' => sub {
-  plan tests => 4;
+  plan tests => 2;
 
   # Mock cellbuf and output to verify tb_present
   my @calls;
   my $flushed_buffer = '';
   no warnings 'redefine';
-  local *Termbox::cellbuf_get = sub {
-    my ($buf, $x, $y, $out) = @_;
-    $$out = {
-      ch   => "e\x{301}",   # 'é'
-      fg   => 1,
-      bg   => 2,
-    };
-    return TB_OK;
-  };
-  local *Termbox::cell_cmp  = sub { return 1 }; # force redraw
-  local *Termbox::send_attr = sub {
-    push @calls, 'attr';
-    return TB_OK;
-  };
-  local *Termbox::send_cluster = sub {
-    push @calls, 'cluster';
-    return TB_OK;
-  };
-  local *Termbox::send_cursor_if = sub {
-    push @calls, 'cursor';
-    return TB_OK;
-  };
   local *Termbox::bytebuf_flush = sub {
     push @calls, 'flush';
     return TB_OK;
@@ -59,8 +37,6 @@ subtest 'tb_present basic render pass' => sub {
 
   # Test that tb_present calls the expected output functions
   is(tb_present(), TB_OK, 'tb_present returns TB_OK');
-  ok(grep(/attr/,    @calls), 'send_attr was called');
-  ok(grep(/cluster/, @calls), 'send_cluster was called');
   ok(grep(/flush/,   @calls), 'bytebuf_flush was called');
 };
 

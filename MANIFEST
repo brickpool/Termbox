@@ -3,7 +3,9 @@ bin/DerivedGeneralCategory.txt
 bin/EastAsianWidth.txt
 Changes
 example/10print.pl
+example/editbox.pl
 example/hello_world.pl
+example/lavat.pl
 lib/Termbox/PP.pm
 lib/Termbox/PP.pod
 lib/Termbox/PP/Terminfo/Builtin.pm
@@ -13,6 +15,7 @@ LICENSE
 Makefile.PL
 MANIFEST
 README.pod
+t/00-begin.t
 t/01_basic/00_load.t
 t/01_basic/01_types.t
 t/01_basic/02_common.t
@@ -52,14 +55,3 @@ t/06_api/12_set_hide_cursor.t
 t/06_api/13_present_invalidate.t
 t/06_api/14_init_shutdown.t
 xt/01_pod.t
-xt/test_64bit.t
-xt/test_basic.t
-xt/test_error.t
-xt/test_invalid_utf8.t
-xt/test_invalidate.t
-xt/test_non_printable.t
-xt/test_non_spacing_mark.t
-xt/test_output_mode.t
-xt/test_print.t
-xt/test_resize.t
-xt/test_set_get.t

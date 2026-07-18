@@ -62,7 +62,7 @@ subtest 'cellbuf->clear()' => sub {
   lives_ok(
     sub {
       my $i;
-      $_->{fg} = ++$i foreach @{ $buf->{cells} };
+      $_->[1] = ++$i foreach @{ $buf->{cells} };
       $buf->clear() and die;
     },
     'clear'
@@ -76,8 +76,7 @@ subtest 'cellbuf->clear()' => sub {
   );
   is_deeply(
     $buf->{cells},
-    [ 
-      map { { ch => ' ', fg => 0, bg => 0 } } 
+    [ map { [ ' ', 0, 0 ] }
         1..$buf->{width}*$buf->{height} 
     ],
     'empty'
@@ -90,7 +89,7 @@ subtest 'cellbuf->resize()' => sub {
   lives_ok(
     sub {
       my $i;
-      $_->{fg} = ++$i foreach @{ $buf->{cells} };
+      $_->[1] = ++$i foreach @{ $buf->{cells} };
       $buf->resize(2, 3);
     },
     'resize 2x3'
@@ -104,12 +103,12 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { ch => ' ', fg => 1, bg => 0 },
-      { ch => ' ', fg => 2, bg => 0 },
-      { ch => ' ', fg => 4, bg => 0 },
-      { ch => ' ', fg => 5, bg => 0 },
-      { ch => ' ', fg => 7, bg => 0 },
-      { ch => ' ', fg => 8, bg => 0 },
+      [ ' ', 1, 0 ],
+      [ ' ', 2, 0 ],
+      [ ' ', 4, 0 ],
+      [ ' ', 5, 0 ],
+      [ ' ', 7, 0 ],
+      [ ' ', 8, 0 ],
     ],
     'equal'
   );
@@ -129,10 +128,10 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { ch => ' ', fg => 1, bg => 0 },
-      { ch => ' ', fg => 4, bg => 0 },
-      { ch => ' ', fg => 7, bg => 0 },
-      { ch => ' ', fg => 0, bg => 0 },
+      [ ' ', 1, 0 ],
+      [ ' ', 4, 0 ],
+      [ ' ', 7, 0 ],
+      [ ' ', 0, 0 ],
     ],
     'equal'
   );
@@ -152,10 +151,10 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { ch => ' ', fg => 1, bg => 0 },
-      { ch => ' ', fg => 0, bg => 0 },
-      { ch => ' ', fg => 4, bg => 0 },
-      { ch => ' ', fg => 0, bg => 0 },
+      [ ' ', 1, 0 ],
+      [ ' ', 0, 0 ],
+      [ ' ', 4, 0 ],
+      [ ' ', 0, 0 ],
     ],
     'equal'
   );
@@ -163,7 +162,7 @@ subtest 'cellbuf->resize()' => sub {
   lives_ok(
     sub {
       my $i;
-      $_->{fg} = ++$i foreach @{ $buf->{cells} };
+      $_->[1] = ++$i foreach @{ $buf->{cells} };
       $buf->resize(3, 2);
     },
     'resize 3x2'
@@ -177,12 +176,12 @@ subtest 'cellbuf->resize()' => sub {
   is_deeply(
     $buf->{cells},
     [
-      { ch => ' ', fg => 1, bg => 0 },
-      { ch => ' ', fg => 2, bg => 0 },
-      { ch => ' ', fg => 0, bg => 0 },
-      { ch => ' ', fg => 3, bg => 0 },
-      { ch => ' ', fg => 4, bg => 0 },
-      { ch => ' ', fg => 0, bg => 0 },
+      [ ' ', 1, 0 ],
+      [ ' ', 2, 0 ],
+      [ ' ', 0, 0 ],
+      [ ' ', 3, 0 ],
+      [ ' ', 4, 0 ],
+      [ ' ', 0, 0 ],
     ],
     'equal'
   );

@@ -27,9 +27,9 @@ subtest 'cell_set accepts codepoint' => sub {
   lives_ok { $rv = Termbox::cell_set($cell, [ ord('A') ], 1, 3, 4) } 
     'call cell_set(codepoint)';
   is($rv, TB_OK(), 'returns TB_OK');
-  is($cell->{ch}, 'A', 'sets single codepoint');
-  is($cell->{fg}, 3, 'sets fg');
-  is($cell->{bg}, 4, 'sets bg');
+  is($cell->ch, ord('A'), 'sets single codepoint');
+  is($cell->fg, 3,        'sets fg');
+  is($cell->bg, 4,        'sets bg');
 };
 
 subtest 'cell_set accepts arrayref of codepoints' => sub {
@@ -40,8 +40,8 @@ subtest 'cell_set accepts arrayref of codepoints' => sub {
   lives_ok { $rv = Termbox::cell_set($cell, [ ord('A'), 0x0308 ], 2, 5, 6) } 
     'call cell_set(arrayref)';
   is($rv, TB_OK(), 'returns TB_OK');
-  is(substr($cell->{ch}, 0, 1), 'A', 'first codepoint is set');
-  is($cell->{fg}, 5, 'sets fg');
+  is(substr(chr($cell->ch), 0, 1), 'A', 'first codepoint is set');
+  is($cell->fg, 5, 'sets fg');
 };
 
 subtest 'cell_set rejects string input' => sub {

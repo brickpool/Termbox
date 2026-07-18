@@ -53,6 +53,7 @@ subtest 'bytebuf_reserve and bytebuf_free wrappers' => sub {
 };
 
 subtest 'bytebuf_flush wrapper' => sub {
+  plan skip_all => 'Not available on Windows' if $^O eq 'MSWin32';
   plan tests => 5;
   my $buf = "hello";
   my ($fh, $path) = tempfile();

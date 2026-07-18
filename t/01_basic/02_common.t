@@ -6,7 +6,7 @@ use Test::More;
 
 BEGIN {
   require_ok 'Termbox::PP';
-  use_ok 'Termbox', qw( :return :event :color );
+  use_ok 'Termbox', qw( :return :event :colors );
 }
 
 subtest 'global default shape after tb_reset' => sub {
@@ -57,8 +57,8 @@ subtest 'tb_last_errno tracks global error slot' => sub {
 subtest 'tb_reset preserves ttyfd_open only' => sub {
   plan tests => 5;
 
+  local $Termbox::global->{initialized} = 1;
   $Termbox::global->{ttyfd_open} = 1;
-  $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
 

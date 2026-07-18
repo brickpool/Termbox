@@ -11,7 +11,7 @@ BEGIN {
 }
 
 subtest 'tb_printf_inner - error handling' => sub {
-  $Termbox::global->{initialized} = 1;
+  local $Termbox::global->{initialized} = 1;
   $Termbox::global->{width} = 80;
   $Termbox::global->{height} = 24;
 

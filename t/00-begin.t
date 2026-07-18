@@ -72,12 +72,16 @@ use constant HEADLESS => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
   NONINTERACTIVE_TESTING
 );
 
+use constant _WIN32 => $^O eq 'MSWin32';
+use if _WIN32, 'Win32';
+
 sub banner {
   diag( ' ' );
   diag( '# ' x 36 );
   diag( ' ' );
   diag( "  OS:       $^O" );
   diag( "  PERL:     $]" );
+  diag( "  CP:       ", Win32::GetConsoleOutputCP() ) if _WIN32;
   diag( "  MODE:     ", HEADLESS ? "headless" : "normal" );
   diag( "  STRICT:   ", STRICT   ? "enabled"  : "not enabled" );
   diag( ' ' );
@@ -120,13 +124,16 @@ bytes
 Carp
 constant
 Config
+Errno
 Exporter
+Fcntl
 IO::File
 Params::Check
 Scalar::Util
 POSIX
 Unicode::UCD
 utf8
+vars
 
 Test::More
 Data::Dumper
@@ -139,6 +146,11 @@ List::Util
 Pod::Usage
 Time::HiRes
 Unicode::EastAsianWidth::Detect
+
+Win32
+Win32::API
+Win32::Console
+Win32API::File
 
 $LANG
 $LOCALE
