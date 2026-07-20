@@ -95,10 +95,10 @@ sub WriteMakefile1 { # void (%params)
   $eumm_version = eval $eumm_version;
 
   if ($^O eq 'MSWin32') {
-    # $params{PREREQ_PM}->{'Win32'}           = 0;
     $params{PREREQ_PM}->{'Win32::Console'}  = 0.10;
     $params{PREREQ_PM}->{'Win32::API'}      = 0.75;
     $params{PREREQ_PM}->{'Win32API::File'}  = 0.1201;
+    $params{PREREQ_PM}->{'Win32::IPC'}      = 1.11;
   }
 
   if ($params{TEST_REQUIRES} and $eumm_version < 6.6303) {

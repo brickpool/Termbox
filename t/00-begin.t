@@ -72,8 +72,8 @@ use constant HEADLESS => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
   NONINTERACTIVE_TESTING
 );
 
-use constant _WIN32 => $^O eq 'MSWin32';
-use if _WIN32, 'Win32';
+use constant _WIN32 => ($^O eq 'MSWin32') 
+                    && eval { require Win32::Console };
 
 sub banner {
   diag( ' ' );
@@ -81,7 +81,7 @@ sub banner {
   diag( ' ' );
   diag( "  OS:       $^O" );
   diag( "  PERL:     $]" );
-  diag( "  CP:       ", Win32::GetConsoleOutputCP() ) if _WIN32;
+  diag( "  CP:       ", Win32::Console::_GetConsoleOutputCP() ) if _WIN32;
   diag( "  MODE:     ", HEADLESS ? "headless" : "normal" );
   diag( "  STRICT:   ", STRICT   ? "enabled"  : "not enabled" );
   diag( ' ' );
@@ -92,7 +92,8 @@ banner();
 
 while (<DATA>) {
   chomp;
-    
+  s/\r\z//;
+
   if (/^#\s*(.*)$/ or /^$/) {
     diag($1 || "");
     next;
@@ -147,10 +148,10 @@ Pod::Usage
 Time::HiRes
 Unicode::EastAsianWidth::Detect
 
-Win32
 Win32::API
 Win32::Console
 Win32API::File
+Win32::IPC
 
 $LANG
 $LOCALE
@@ -168,6 +169,7 @@ $RELEASE_TESTING
 $NDEBUG
 $PERL_NDEBUG
 
+$TB_LIB_OPTS
 $TB_OPT_EGC
 $TB_OPT_PRINTF_BUF
 $TB_OPT_READ_BUF

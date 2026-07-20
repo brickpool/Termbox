@@ -28,7 +28,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.5.0');
+our $VERSION = version->declare('v0.5.1');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -73,28 +73,48 @@ use constant STRICT => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
 # overridden by setting the corresponding environment variables before loading 
 # this module.
 
-use constant TB_OPT_EGC => exists $ENV{TB_OPT_EGC} ? !!$ENV{TB_OPT_EGC} : 1;
+# Ensure consistent compile-time options
+use constant TB_LIB_OPTS => 
+  exists $ENV{TB_LIB_OPTS} && $ENV{TB_LIB_OPTS} ? 1 : 0;
 
-# Define this to set the string length used in 'tb_printf' and 'tb_sendf'.
-use constant TB_OPT_PRINTF_BUF => exists $ENV{TB_OPT_PRINTF_BUF} 
-  ? 0+$ENV{TB_OPT_PRINTF_BUF} 
-  : 4096;
+# Deprecated. Sets TB_OPT_ATTR_W to 32 if not already set.
+use constant TB_OPT_TRUECOLOR => 
+  exists $ENV{TB_OPT_TRUECOLOR} && $ENV{TB_OPT_TRUECOLOR} ? 1 : 0;
 
-# Define this to set the size of the buffer used when reading from the tty.
-use constant TB_OPT_READ_BUF => exists $ENV{TB_OPT_READ_BUF} 
-  ? 0+$ENV{TB_OPT_READ_BUF} 
-  : 64;
+# Integer width of fg and bg attributes. Valid values (assuming system support) 
+# are 16, 32, and 64. 32 or 64 enables output mode TB_OUTPUT_TRUECOLOR. 
+# 64 enables additional style attributes. (See tb_set_output_mode.) Larger 
+# values consume more memory in exchange for more features. Defaults to 16.
+use constant TB_OPT_ATTR_W => 
+  ( TB_LIB_OPTS                              ) ? $Config{ivsize} * 8 :
+  ( exists $ENV{TB_OPT_ATTR_W} 
+    && $ENV{TB_OPT_ATTR_W} =~ /^(16|32|64)$/ ) ? $ENV{TB_OPT_ATTR_W} :
+  ( TB_OPT_TRUECOLOR                         ) ? 32                  : 
+                                                 16                  ;
 
-# This port does not call libc wcwidth(). TB_OPT_LIBC_WCHAR selects the 
-# Unicode::UCD-based runtime backend. 
-use constant TB_OPT_LIBC_WCHAR => !!(
-    (exists $ENV{TB_OPT_LIBC_WCHAR} ? $ENV{TB_OPT_LIBC_WCHAR} : 0)
-  && Unicode::UCD->can('prop_invmap')
-  && Unicode::UCD->can('search_invlist')
-);
+# If set, enable extended grapheme cluster support (tb_extend_cell, 
+# tb_set_cell_ex). Consumes more memory. Defaults off.
+use constant TB_OPT_EGC => !TB_LIB_OPTS 
+  && exists $ENV{TB_OPT_EGC} && $ENV{TB_OPT_EGC} ? 1 : 0;
+
+# Write buffer size for printf operations. Represents the largest string that 
+# can be sent in one call to tb_print and tb_send functions. Defaults to 4096.
+use constant TB_OPT_PRINTF_BUF => !TB_LIB_OPTS 
+  && exists $ENV{TB_OPT_PRINTF_BUF} ? 0+$ENV{TB_OPT_PRINTF_BUF} : 4096;
+
+# Read buffer size for tty reads. Defaults to 64.
+use constant TB_OPT_READ_BUF => !TB_LIB_OPTS 
+  && exists $ENV{TB_OPT_READ_BUF} ? 0+$ENV{TB_OPT_READ_BUF} : 64;
+
+# If set, use Perl's core Unicode::UCD module instead of the built-in 
+# Unicode-aware versions. Note, Unicode::UCD are version-dependent and must 
+# support prop_invmap and search_invlist. Defaults to built-in.
+use constant TB_OPT_LIBC_WCHAR => !TB_LIB_OPTS 
+  && exists $ENV{TB_OPT_LIBC_WCHAR} && $ENV{TB_OPT_LIBC_WCHAR} 
+  && Unicode::UCD->can('prop_invmap') 
+  && Unicode::UCD->can('search_invlist') ? 1 : 0;
 
 use constant TB_PATH_MAX => exists $ENV{PATH_MAX} ? 0+$ENV{PATH_MAX} : 4096;
-
 use constant TB_TERMINFO_DIR => exists $ENV{TB_TERMINFO_DIR} 
   ? ''.$ENV{TB_TERMINFO_DIR}
   : undef;
@@ -103,18 +123,6 @@ use constant TB_RESIZE_FALLBACK_MS => exists $ENV{TB_RESIZE_FALLBACK_MS}
   ? 0+$ENV{TB_RESIZE_FALLBACK_MS}
   : 1000;
 
-# Deprecated. Back-compat for old flag.
-use constant TB_OPT_TRUECOLOR => exists $ENV{TB_OPT_TRUECOLOR} 
-  ? !!$ENV{TB_OPT_TRUECOLOR} 
-  : undef;
-
-# Ensure sane 'TB_OPT_ATTR_W' (16, 32, or 64)
-use constant TB_OPT_ATTR_W => 
-  ( exists $ENV{TB_OPT_ATTR_W} 
-    && $ENV{TB_OPT_ATTR_W} =~ /^(16|32|64)$/ ) ? $ENV{TB_OPT_ATTR_W} :
-  ( !defined TB_OPT_TRUECOLOR                ) ? $Config{ivsize} * 8 : 
-  (          TB_OPT_TRUECOLOR                ) ? 32                  : 
-                                                 16                  ;
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
 # ------------------------------------------------------------------------
@@ -320,8 +328,8 @@ our %EXPORT_TAGS = (
     TB_HI_BLACK
     TB_BRIGHT
     TB_DIM
-    ), 
-    TB_OPT_ATTR_W == 32
+    ),
+    TB_OPT_ATTR_W == 16
     ? qw( TB_256_BLACK )
     : qw( TB_TRUECOLOR_BOLD
           TB_TRUECOLOR_UNDERLINE
@@ -587,7 +595,7 @@ BEGIN { if (TB_OPT_ATTR_W == 16) {
   *TB_DIM         = sub () { 0x8000 };
   *TB_256_BLACK   = &TB_HI_BLACK;    # TB_256_BLACK is deprecated
 }
-else {
+else { # TB_OPT_ATTR_W is 32 or 64
   no warnings 'once';
   *TB_BOLD                = sub () { 0x00010000 };
   *TB_UNDERLINE           = sub () { 0x00020000 };
@@ -1412,7 +1420,7 @@ $global = {
   ttyfd       => _WIN32 ? INVALID_HANDLE_VALUE : -1,
   rfd         => _WIN32 ? INVALID_HANDLE_VALUE : -1,
   wfd         => _WIN32 ? INVALID_HANDLE_VALUE : -1,
-  ttyfd_open  => undef,
+  ttyfd_open  => 0,
   resize_pipefd => [-1, -1],
 
   # Terminal state
@@ -1635,28 +1643,23 @@ sub bytebuf_free;
 sub tb_init {    # $int ()
   state $sig = compile();
   $sig->(@_);
-  if (_WIN32) {
-    # Windows Terminal (WT) does not support the traditional termios interface, 
-    # so we need to use the Windows API to open the console handles directly.
-    my ($err, $out, $rfd, $wfd);
-
-    use open IO => ':raw'; # https://github.com/Perl/perl5/issues/17665
-    $err = sysopen($out, 'CONOUT$', O_RDWR) ? 0 : $!+0;
-    if ($err != 0) {
-      $global->{last_errno} = $err;
-      return TB_ERR_WIN_NO_STDIO;
-    }
-    $global->{ttyfd_open} = $out;
-    $err = sysopen(IN, 'CONIN$', O_RDWR) ? 0 : $!+0;
-    if ($err != 0) {
-      $global->{last_errno} = $err;
-      return TB_ERR_WIN_NO_STDIO;
-    }
-
-    $rfd = fileno(\*IN);
-    $wfd = fileno($out);
-    return tb_init_rwfd($rfd, $wfd);
+if (_WIN32) {
+  # Windows Terminal (WT) does not support the traditional termios interface, 
+  # so we need to use the Windows API to open the console handles directly.
+  use open IO => ':raw'; # https://github.com/Perl/perl5/issues/17665
+  my $err = sysopen(TB_OUT, 'CONOUT$', O_RDWR) ? 0 : $!+0;
+  if ($err != 0) {
+    $global->{last_errno} = $err;
+    return TB_ERR_WIN_NO_STDIO;
   }
+  $err = sysopen(TB_IN, 'CONIN$', O_RDWR) ? 0 : $!+0;
+  if ($err != 0) {
+    $global->{last_errno} = $err;
+    return TB_ERR_WIN_NO_STDIO;
+  }
+  $global->{ttyfd_open} = 1;
+  return tb_init_rwfd(fileno(TB_IN), fileno(TB_OUT));
+} #endif
   return tb_init_file('/dev/tty');
 }
 
@@ -1666,15 +1669,15 @@ sub tb_init_file {    # $int ($path)
   );
   my ($path) =$sig->(@_);
   return TB_ERR_INIT_ALREADY if $global->{initialized};
-  return TB_ERR_WIN_UNSUPPORTED if _WIN32;
-
-  my $ttyfd = POSIX::open($path, POSIX::O_RDWR);
-  if (!defined $ttyfd || $ttyfd < 0) {
+if (_WIN32) {
+  return TB_ERR_WIN_UNSUPPORTED;
+} #endif
+  my $ttyfd = sysopen(TB_OUT, $path, O_RDWR) ? (fileno(TB_OUT) // -1) : -1;
+  if ($ttyfd < 0) {
     $global->{last_errno} = 0+ $!;
     return TB_ERR_INIT_OPEN;
   }
-
-  $global->{ttyfd_open} = IO::File->new_from_fd($ttyfd, '+<');
+  $global->{ttyfd_open} = 1;
   return tb_init_fd($ttyfd);
 }
 
@@ -1683,7 +1686,9 @@ sub tb_init_fd {    # $int ($ttyfd)
     _Int,
   );
   my ($ttyfd) = $sig->(@_);
-  return TB_ERR_WIN_UNSUPPORTED if _WIN32;
+if (_WIN32) {
+  return TB_ERR_WIN_UNSUPPORTED;
+} #endif
   return tb_init_rwfd($ttyfd, $ttyfd);
 }
 
@@ -1696,69 +1701,69 @@ sub tb_init_rwfd {    # $int ($rfd, $wfd)
   my $rv;
 
   tb_reset();
-  if (_WIN32) {
-    my ($hInput, $hOutput);
+if (_WIN32) {
+  my ($hInput, $hOutput);
 
-    for (1) {
-      # Check if the file descriptors are windows handles
-      $hInput = FdGetOsFHandle($rfd) // INVALID_HANDLE_VALUE;
-      if ($hInput == INVALID_HANDLE_VALUE) { $rv = TB_ERR_WIN_NO_STDIO; last }
-      $hOutput = FdGetOsFHandle($wfd) // INVALID_HANDLE_VALUE;
-      if ($hOutput == INVALID_HANDLE_VALUE) { $rv = TB_ERR_WIN_NO_STDIO; last }
+  for (1) {
+    # Check if the file descriptors are windows handles
+    $hInput = FdGetOsFHandle($rfd) // INVALID_HANDLE_VALUE;
+    if ($hInput == INVALID_HANDLE_VALUE) { $rv = TB_ERR_WIN_NO_STDIO; last }
+    $hOutput = FdGetOsFHandle($wfd) // INVALID_HANDLE_VALUE;
+    if ($hOutput == INVALID_HANDLE_VALUE) { $rv = TB_ERR_WIN_NO_STDIO; last }
 
-      # Ensure the input and output handle are valid console handles
-      $^E = 0;
-      Win32::Console::_GetConsoleMode($hInput);
-      if ($^E) { $rv = TB_ERR_WIN_GET_CONMODE; last }
-      my $mode_out = Win32::Console::_GetConsoleMode($hOutput);
-      if ($^E) { $rv = TB_ERR_WIN_GET_CONMODE; last }
+    # Ensure the input and output handle are valid console handles
+    $^E = 0;
+    Win32::Console::_GetConsoleMode($hInput);
+    if ($^E) { $rv = TB_ERR_WIN_GET_CONMODE; last }
+    my $mode_out = Win32::Console::_GetConsoleMode($hOutput);
+    if ($^E) { $rv = TB_ERR_WIN_GET_CONMODE; last }
 
-      # Check if the console handle supports virtual terminal processing
-      Win32::Console::_SetConsoleMode($hOutput, 
-        $mode_out | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-      if ($^E) { $rv = TB_ERR_WIN_UNSUPPORTED; last }
-      my $supportsVT = Win32::Console::_GetConsoleMode($hOutput) 
-        & ENABLE_VIRTUAL_TERMINAL_PROCESSING ? 1 : 0;
-      if ($^E) { $rv = TB_ERR_WIN_GET_CONMODE; last }
+    # Check if the console handle supports virtual terminal processing
+    Win32::Console::_SetConsoleMode($hOutput, 
+      $mode_out | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    if ($^E) { $rv = TB_ERR_WIN_UNSUPPORTED; last }
+    my $supportsVT = Win32::Console::_GetConsoleMode($hOutput) 
+      & ENABLE_VIRTUAL_TERMINAL_PROCESSING ? 1 : 0;
+    if ($^E) { $rv = TB_ERR_WIN_GET_CONMODE; last }
 
-      # Restore the original console mode after checking for VT support
-      Win32::Console::_SetConsoleMode($hOutput, $mode_out);
-      if ($^E) { $rv = TB_ERR_WIN_SET_CONMODE; last }
+    # Restore the original console mode after checking for VT support
+    Win32::Console::_SetConsoleMode($hOutput, $mode_out);
+    if ($^E) { $rv = TB_ERR_WIN_SET_CONMODE; last }
 
-      # If the console does not support VT processing, return an error
-      if (!$supportsVT) { $rv = TB_ERR_WIN_UNSUPPORTED; last }
+    # If the console does not support VT processing, return an error
+    if (!$supportsVT) { $rv = TB_ERR_WIN_UNSUPPORTED; last }
+  };
+
+  switch: for ($rv // 0) {
+    case: TB_ERR_WIN_NO_STDIO() == $_ and do {
+      $global->{last_errno} = $! = EBADF;
+      last;
     };
-
-    switch: for ($rv // 0) {
-      case: TB_ERR_WIN_NO_STDIO() == $_ and do {
-        $global->{last_errno} = $! = EBADF;
-        last;
-      };
-      case: TB_ERR_WIN_GET_CONMODE() == $_ and do {
-        $global->{last_errno} = $! = ENOTTY;
-        last;
-      };
-      case: TB_ERR_WIN_UNSUPPORTED() == $_ and do {
-        $global->{last_errno} = $! = EOPNOTSUPP;
-        last;
-      };
-      default: {
-        $rv ||= TB_OK;
-      }
+    case: TB_ERR_WIN_GET_CONMODE() == $_ and do {
+      $global->{last_errno} = $! = ENOTTY;
+      last;
+    };
+    case: TB_ERR_WIN_UNSUPPORTED() == $_ and do {
+      $global->{last_errno} = $! = EOPNOTSUPP;
+      last;
+    };
+    default: {
+      $rv ||= TB_OK;
     }
-    return $rv if $rv != TB_OK;
-
-    $global->{ttyfd} = $hOutput;
-    $global->{rfd} = $hInput;
-    $global->{wfd} = $hOutput;
-  } else {
-    $global->{ttyfd} =
-      POSIX::isatty($rfd) ? $rfd :
-      POSIX::isatty($wfd) ? $wfd :
-      -1;
-    $global->{rfd} = $rfd;
-    $global->{wfd} = $wfd;
   }
+  return $rv if $rv != TB_OK;
+
+  $global->{ttyfd} = $hOutput;
+  $global->{rfd} = $hInput;
+  $global->{wfd} = $hOutput;
+} else {
+  $global->{ttyfd} =
+    POSIX::isatty($rfd) ? $rfd :
+    POSIX::isatty($wfd) ? $wfd :
+    -1;
+  $global->{rfd} = $rfd;
+  $global->{wfd} = $wfd;
+} #endif
 
   for (1) {
     $rv = init_term_attrs();        last if $rv != TB_OK;
@@ -1867,11 +1872,15 @@ sub tb_present {    # $int ()
       my $cp;
       my $w;
 
-      if (TB_OPT_EGC && length($ch) > 1 && $ch =~ /\A\X\z/) {
+if (TB_OPT_EGC &&
+#     if (
+        length($ch) > 1 && $ch =~ /\A\X\z/
+      ) {
         $is_cluster = 1;
         $ech = [ unpack 'U*', $ch ];
         $w = tb_cluster_width($ech, scalar @$ech);
       } else {
+#endif
         state %wcwidth_cache;
         $cp = ord($ch);
         $w = $wcwidth_cache{$cp} //= tb_wcwidth($cp);
@@ -1894,9 +1903,13 @@ sub tb_present {    # $int ()
             send_char($i, $y, ord(' '));
           }
         } else {
-          if (TB_OPT_EGC && $is_cluster) {
+if (TB_OPT_EGC &&
+#         if (
+            $is_cluster
+          ) {
             send_cluster($x, $y, $ech, scalar @$ech);
           } else {
+#endif
             send_char($x, $y, $cp);
           }
 
@@ -2031,7 +2044,7 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
   );
   my ($x, $y, $ch) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
-  return TB_ERR unless TB_OPT_EGC;
+if (TB_OPT_EGC) {
   # TODO: iswprint ch?
   my $rv;
   my $cell;
@@ -2040,6 +2053,9 @@ sub tb_extend_cell {    # $int ($x, $y, $ch)
   # Note: tb_extend_cell appends only the first Perl character
   $cell->[0] .= substr($ch, 0, 1);
   return TB_OK;
+} else {
+  return TB_ERR;
+} #endif
 }
 
 #
@@ -2107,7 +2123,10 @@ sub tb_set_output_mode {    # $int ($mode)
           TB_OUTPUT_256       == $_ ||
           TB_OUTPUT_216       == $_ ||
           TB_OUTPUT_GRAYSCALE == $_ ||
-         (TB_OPT_ATTR_W >= 32 && TB_OUTPUT_TRUECOLOR == $_)
+#if 
+    (TB_OPT_ATTR_W >= 32 &&
+          TB_OUTPUT_TRUECOLOR() == $_)
+#endif
     and do {
       $global->{last_fg} = ~$global->{fg};
       $global->{last_bg} = ~$global->{bg};
@@ -2152,8 +2171,9 @@ sub tb_get_fds {      # $int (\$ttyfd, \$resizefd)
   );
   my ($ttyfd, $resizefd) = $sig->(@_);
   return TB_ERR_NOT_INIT unless $global->{initialized};
-  return TB_ERR_WIN_UNSUPPORTED if _WIN32;
-
+if (_WIN32) {
+  return TB_ERR_WIN_UNSUPPORTED;
+} #endif
   $$ttyfd    = $global->{rfd};
   $$resizefd = $global->{resize_pipefd}[0];
 
@@ -2532,11 +2552,11 @@ sub tb_wcwidth {    # $int ($codepoint)
     _PositiveOrZeroInt,
   );
   my ($codepoint) = $sig->(@_);
-  if (TB_OPT_LIBC_WCHAR) {
-    return wcwidth($codepoint);
-  } else {
-    return Termbox::PP::WCWidth::wcwidth($codepoint);
-  }
+if (TB_OPT_LIBC_WCHAR) {
+  return wcwidth($codepoint);
+} else {
+  return Termbox::PP::WCWidth::wcwidth($codepoint);
+} #endif
 }
 
 # ------------------------------------------------------------------------
@@ -2634,69 +2654,69 @@ sub tb_deinit {    # $int ()
 
   if ($global->{ttyfd} >= 0) {
     if ($global->{has_orig_tios}) {
-      if (_WIN32) {
-
-        # Restore the console input mode
-        my $hInput = $global->{rfd} // INVALID_HANDLE_VALUE;
-        if ($hInput == INVALID_HANDLE_VALUE) {
-          $^E = ERROR_INVALID_HANDLE;
-          $global->{last_errno} = $! = EBADF;
-          return TB_ERR_WIN_NO_STDIO;
-        }
-        my $orig_mode_in = $global->{orig_tios}{mode_in};
-        if (defined $orig_mode_in) {
-          $^E = 0;
-          Win32::Console::_SetConsoleMode($hInput, $orig_mode_in);
-          if ($^E) {
-            $global->{last_errno} = $! = ENOTTY;
-            return TB_ERR_WIN_SET_CONMODE;
-          }
-        }
-
-        # Restore the console output mode
-        my $hOutput = $global->{wfd} // INVALID_HANDLE_VALUE;
-        if ($hOutput == INVALID_HANDLE_VALUE) {
-          $^E = ERROR_INVALID_HANDLE;
-          $global->{last_errno} = $! = EBADF;
-          return TB_ERR_WIN_NO_STDIO;
-        }
-        my $orig_mode_out = $global->{orig_tios}{mode_out};
-        if (defined $orig_mode_out) {
-          $^E = 0;
-          Win32::Console::_SetConsoleMode($hOutput, $orig_mode_out);
-          if ($^E) {
-            $global->{last_errno} = $! = ENOTTY;
-            return TB_ERR_WIN_SET_CONMODE;
-          }
-        }
-
-        # Restore the console output codepage
-        my $orig_cp_out = $global->{orig_tios}{cp_out};
-        if (defined $orig_cp_out) {
-          if (!Win32::Console::_SetConsoleOutputCP($orig_cp_out)) {
-            $global->{last_errno} = $! = EIO;
-            return TB_ERR_WIN_SET_CONMODE;
-          }
+if (_WIN32) {
+      # Restore the console input mode
+      my $hInput = $global->{rfd} // INVALID_HANDLE_VALUE;
+      if ($hInput == INVALID_HANDLE_VALUE) {
+        $^E = ERROR_INVALID_HANDLE;
+        $global->{last_errno} = $! = EBADF;
+        return TB_ERR_WIN_NO_STDIO;
+      }
+      my $orig_mode_in = $global->{orig_tios}{mode_in};
+      if (defined $orig_mode_in) {
+        $^E = 0;
+        Win32::Console::_SetConsoleMode($hInput, $orig_mode_in);
+        if ($^E) {
+          $global->{last_errno} = $! = ENOTTY;
+          return TB_ERR_WIN_SET_CONMODE;
         }
       }
-      else {
-        $global->{orig_tios}->setattr($global->{ttyfd}, TCSAFLUSH);
+
+      # Restore the console output mode
+      my $hOutput = $global->{wfd} // INVALID_HANDLE_VALUE;
+      if ($hOutput == INVALID_HANDLE_VALUE) {
+        $^E = ERROR_INVALID_HANDLE;
+        $global->{last_errno} = $! = EBADF;
+        return TB_ERR_WIN_NO_STDIO;
       }
+      my $orig_mode_out = $global->{orig_tios}{mode_out};
+      if (defined $orig_mode_out) {
+        $^E = 0;
+        Win32::Console::_SetConsoleMode($hOutput, $orig_mode_out);
+        if ($^E) {
+          $global->{last_errno} = $! = ENOTTY;
+          return TB_ERR_WIN_SET_CONMODE;
+        }
+      }
+
+      # Restore the console output codepage
+      my $orig_cp_out = $global->{orig_tios}{cp_out};
+      if (defined $orig_cp_out) {
+        if (!Win32::Console::_SetConsoleOutputCP($orig_cp_out)) {
+          $global->{last_errno} = $! = EIO;
+          return TB_ERR_WIN_SET_CONMODE;
+        }
+      }
+} else {
+      $global->{orig_tios}->setattr($global->{ttyfd}, TCSAFLUSH);
+} #endif
     }
     if ($global->{ttyfd_open}) {
-      close($global->{ttyfd_open});
-      close(IN) if _WIN32;
-      $global->{ttyfd_open} = undef;
+      close(TB_OUT);
+if (_WIN32) {
+      close(TB_IN);
+} #endif
+      $global->{ttyfd_open} = 0;
       $global->{ttyfd} = -1;
     }
   }
 
-  if ($^O ne 'MSWin32') {
-    $SIG{WINCH} = 'DEFAULT' if exists $SIG{WINCH};
-    foreach my $fd (@{ $global->{resize_pipefd}}) {
-      POSIX::close($fd) if $fd >= 0;
-    }
+if (!_WIN32) {
+  $SIG{WINCH} = 'DEFAULT' if exists $SIG{WINCH};
+  foreach my $fd (@{ $global->{resize_pipefd}}) {
+    POSIX::close($fd) if $fd >= 0;
   }
+} #endif
 
   cellbuf_free($global->{back});
   cellbuf_free($global->{front});
@@ -2723,29 +2743,27 @@ sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
     _Maybe[_ScalarRef],
   );
   my ($ch, $width) = $sig->(@_);
+if (TB_OPT_LIBC_WCHAR) {
+  my $w = wcwidth($ch);
+  $$width = $w if defined $width;
 
-  if (TB_OPT_LIBC_WCHAR) {
-    my $w = wcwidth($ch);
-    $$width = $w if defined $width;
-
-    # NUL is not printable even though width is 0.
-    return $ch != 0 && $w >= 0 ? 1 : 0;
-  } else {
-
-    # Fast path for 1-byte codepoints
-    if (($ch >= 0x20 && $ch <= 0x7e) || ($ch >= 0xa0 && $ch <= 0xff)) {
-      $$width = 1 if defined $width;
-      return 1;
-    }
-    if ($ch <= 0xff) {
-      $$width = ($ch == 0 ? 0 : -1) if defined $width;
-      return 0;
-    }
-
-    my $w = Termbox::PP::WCWidth::wcwidth($ch);
-    $$width = $w if defined $width;
-    return $w >= 0 ? 1 : 0;
+  # NUL is not printable even though width is 0.
+  return $ch != 0 && $w >= 0 ? 1 : 0;
+} else {
+  # Fast path for 1-byte codepoints
+  if (($ch >= 0x20 && $ch <= 0x7e) || ($ch >= 0xa0 && $ch <= 0xff)) {
+    $$width = 1 if defined $width;
+    return 1;
   }
+  if ($ch <= 0xff) {
+    $$width = ($ch == 0 ? 0 : -1) if defined $width;
+    return 0;
+  }
+
+  my $w = Termbox::PP::WCWidth::wcwidth($ch);
+  $$width = $w if defined $width;
+  return $w >= 0 ? 1 : 0;
+} #endif
 }
 
 sub tb_cluster_width {    # $int (\@cluster, $nch)
@@ -2788,83 +2806,83 @@ sub init_term_attrs {    # $int ()
 
   return TB_OK if $global->{ttyfd} < 0;
 
-  if (_WIN32) {
-    # Set the console input mode
-    my $hInput = $global->{rfd} // INVALID_HANDLE_VALUE;
-    if ($hInput == INVALID_HANDLE_VALUE) {
-      $^E = ERROR_INVALID_HANDLE;
-      $global->{last_errno} = $! = EBADF;
-      return TB_ERR_WIN_NO_STDIO;
-    }
-    $^E = 0;
-    my $orig_mode_in = Win32::Console::_GetConsoleMode($hInput);
-    if ($^E) {
-      $global->{last_errno} = $! = ENOTTY;
-      return TB_ERR_WIN_GET_CONMODE;
-    }
-    my $mode = $orig_mode_in;
-    $mode &= ~ENABLE_ECHO_INPUT();      # Turn off echo in a terminal
-    $mode &= ~ENABLE_LINE_INPUT();      # no CR for ReadFile or ReadConsole
-    $mode |= ENABLE_WINDOW_INPUT();     # Report changes in buffer size
-    $mode &= ~ENABLE_PROCESSED_INPUT(); # Report CTRL+C and SHIFT+Arrow events
-    $mode |= ENABLE_EXTENDED_FLAGS();   # Disable the Quick Edit mode,
-    $mode &= ~ENABLE_QUICK_EDIT_MODE(); # which inhibits the mouse
-    $mode |= ENABLE_VIRTUAL_TERMINAL_INPUT(); # Allow ANSI escape sequences
-    $^E = 0;
-    Win32::Console::_SetConsoleMode($hInput, $mode);
-    if ($^E) {
-      $global->{last_errno} = $! = ENOTTY;
-      return TB_ERR_WIN_SET_CONMODE;
-    }
-
-    # Set the console output mode
-    my $hOutput = $global->{wfd} // INVALID_HANDLE_VALUE;
-    if ($hOutput == INVALID_HANDLE_VALUE) {
-      $^E = ERROR_INVALID_HANDLE;
-      $global->{last_errno} = $! = EBADF;
-      return TB_ERR_WIN_NO_STDIO;
-    }
-    $^E = 0;
-    my $orig_mode_out = Win32::Console::_GetConsoleMode($hOutput);
-    if ($^E) {
-      $global->{last_errno} = $! = ENOTTY;
-      return TB_ERR_WIN_GET_CONMODE;
-    }
-    $mode = $orig_mode_out;
-    $mode |= ENABLE_PROCESSED_OUTPUT();     # enable when using escape sequences.
-    $mode &= ~ENABLE_WRAP_AT_EOL_OUTPUT();  # Avoid scrolling when reaching EOL.
-    $mode |= DISABLE_NEWLINE_AUTO_RETURN(); # Do not do CR on LF.
-    $mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING(); # Allow ANSI escape sequences.
-    $^E = 0;
-    Win32::Console::_SetConsoleMode($hOutput, $mode);
-    if ($^E) {
-      $global->{last_errno} = $! = ENOTTY;
-      return TB_ERR_WIN_SET_CONMODE;
-    }
-
-    # Set the console output codepage to utf8
-    $^E = 0;
-    my $orig_cp_out = Win32::Console::_GetConsoleOutputCP();
-    if ($^E) {
-      $global->{last_errno} = $! = EIO;
-      return TB_ERR_WIN_GET_CONMODE;
-    }
-    if (!Win32::Console::_SetConsoleOutputCP(CP_UTF8())) {
-      $global->{last_errno} = $! = EIO;
-      return TB_ERR_WIN_SET_CONMODE;
-    }
-
-    if (!$global->{has_orig_tios}) {
-      $global->{orig_tios} = {
-        mode_in  => $orig_mode_in,
-        mode_out => $orig_mode_out,
-        cp_out   => $orig_cp_out,
-      };
-      $global->{has_orig_tios} = 1;
-    }
-
-    return TB_OK;
+if (_WIN32) {
+  # Set the console input mode
+  my $hInput = $global->{rfd} // INVALID_HANDLE_VALUE;
+  if ($hInput == INVALID_HANDLE_VALUE) {
+    $^E = ERROR_INVALID_HANDLE;
+    $global->{last_errno} = $! = EBADF;
+    return TB_ERR_WIN_NO_STDIO;
   }
+  $^E = 0;
+  my $orig_mode_in = Win32::Console::_GetConsoleMode($hInput);
+  if ($^E) {
+    $global->{last_errno} = $! = ENOTTY;
+    return TB_ERR_WIN_GET_CONMODE;
+  }
+  my $mode = $orig_mode_in;
+  $mode &= ~ENABLE_ECHO_INPUT();      # Turn off echo in a terminal
+  $mode &= ~ENABLE_LINE_INPUT();      # no CR for ReadFile or ReadConsole
+  $mode |= ENABLE_WINDOW_INPUT();     # Report changes in buffer size
+  $mode &= ~ENABLE_PROCESSED_INPUT(); # Report CTRL+C and SHIFT+Arrow events
+  $mode |= ENABLE_EXTENDED_FLAGS();   # Disable the Quick Edit mode,
+  $mode &= ~ENABLE_QUICK_EDIT_MODE(); # which inhibits the mouse
+  $mode |= ENABLE_VIRTUAL_TERMINAL_INPUT(); # Allow ANSI escape sequences
+  $^E = 0;
+  Win32::Console::_SetConsoleMode($hInput, $mode);
+  if ($^E) {
+    $global->{last_errno} = $! = ENOTTY;
+    return TB_ERR_WIN_SET_CONMODE;
+  }
+
+  # Set the console output mode
+  my $hOutput = $global->{wfd} // INVALID_HANDLE_VALUE;
+  if ($hOutput == INVALID_HANDLE_VALUE) {
+    $^E = ERROR_INVALID_HANDLE;
+    $global->{last_errno} = $! = EBADF;
+    return TB_ERR_WIN_NO_STDIO;
+  }
+  $^E = 0;
+  my $orig_mode_out = Win32::Console::_GetConsoleMode($hOutput);
+  if ($^E) {
+    $global->{last_errno} = $! = ENOTTY;
+    return TB_ERR_WIN_GET_CONMODE;
+  }
+  $mode = $orig_mode_out;
+  $mode |= ENABLE_PROCESSED_OUTPUT();     # enable when using escape sequences.
+  $mode &= ~ENABLE_WRAP_AT_EOL_OUTPUT();  # Avoid scrolling when reaching EOL.
+  $mode |= DISABLE_NEWLINE_AUTO_RETURN(); # Do not do CR on LF.
+  $mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING(); # Allow ANSI escape sequences.
+  $^E = 0;
+  Win32::Console::_SetConsoleMode($hOutput, $mode);
+  if ($^E) {
+    $global->{last_errno} = $! = ENOTTY;
+    return TB_ERR_WIN_SET_CONMODE;
+  }
+
+  # Set the console output codepage to utf8
+  $^E = 0;
+  my $orig_cp_out = Win32::Console::_GetConsoleOutputCP();
+  if ($^E) {
+    $global->{last_errno} = $! = EIO;
+    return TB_ERR_WIN_GET_CONMODE;
+  }
+  if (!Win32::Console::_SetConsoleOutputCP(CP_UTF8())) {
+    $global->{last_errno} = $! = EIO;
+    return TB_ERR_WIN_SET_CONMODE;
+  }
+
+  if (!$global->{has_orig_tios}) {
+    $global->{orig_tios} = {
+      mode_in  => $orig_mode_in,
+      mode_out => $orig_mode_out,
+      cp_out   => $orig_cp_out,
+    };
+    $global->{has_orig_tios} = 1;
+  }
+
+  return TB_OK;
+} #endif
 
   $global->{orig_tios} = POSIX::Termios->new() // return TB_ERR_TCGETATTR;
 
@@ -2891,9 +2909,9 @@ sub init_term_attrs {    # $int ()
 sub init_term_caps {    # $int ()
   state $sig = compile();
   $sig->(@_);
-  if (_WIN32) {
-    return load_builtin_caps();
-  }
+if (_WIN32) {
+  return load_builtin_caps();
+} #endif
   if (load_terminfo() == TB_OK) {
     return parse_terminfo_caps();
   }
@@ -2907,8 +2925,9 @@ sub init_term_caps {    # $int ()
 sub load_terminfo {    # $int ()
   state $sig = compile();
   $sig->(@_);
-  return TB_ERR_WIN_UNSUPPORTED if _WIN32;
-
+if (_WIN32) {
+  return TB_ERR_WIN_UNSUPPORTED;
+} #endif
   my $rv;
 
   # See terminfo(5) "Fetching Compiled Descriptions" for a description of
@@ -3100,12 +3119,12 @@ sub load_builtin_caps {    # $int ()
   state $sig = compile();
   $sig->(@_);
   my $term = $ENV{"TERM"};
-
+if (_WIN32) {
   # Windows Virtual Terminal is xterm-256color compatible
   # https://github.com/microsoft/terminal/issues/6045#issuecomment-631645277
   # https://superuser.com/a/1691012
-  $term ||= 'xterm-256color' if _WIN32;
-
+  $term ||= 'xterm-256color' 
+} #endif
   return TB_ERR_NO_TERM unless $term;
 
   my $builtin_terms = do {
@@ -3203,7 +3222,9 @@ sub get_terminfo_int16 {    # $int ($offset, \$val)
 sub init_resize_handler {    # $int ()
   state $sig = compile();
   $sig->(@_);
-  return TB_OK if _WIN32;
+if (_WIN32) {
+  return TB_OK;
+} #endif
   my ($rfd, $wfd);
   unless (($rfd, $wfd) = POSIX::pipe()) {
     $global->{last_errno} = 0+ $!;
@@ -3236,7 +3257,9 @@ sub handle_resize {    # void ($sig)
     _Int,
   );
   my ($signo) = $sig->(@_);
-  return if _WIN32;
+if (_WIN32) {
+  return;
+} #endif
   local $! = $!;
   my $payload = pack('i', $signo);
   POSIX::write($global->{resize_pipefd}[1], $payload, length($payload));
@@ -3247,18 +3270,18 @@ sub update_term_size {    # $int ()
   state $sig = compile();
   $sig->(@_);
 
-  if (_WIN32) {
-    my $hOutput = $global->{ttyfd} // INVALID_HANDLE_VALUE;
-    return TB_OK if $hOutput == INVALID_HANDLE_VALUE;
-    my ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($hOutput);
-    unless ($col && $row) {
-      $global->{last_errno} = $! = ENOTTY;
-      return TB_ERR_WIN_RESIZE;
-    }
-    $global->{width}  = $col;
-    $global->{height} = $row;
-    return TB_OK;
+if (_WIN32) {
+  my $hOutput = $global->{ttyfd} // INVALID_HANDLE_VALUE;
+  return TB_OK if $hOutput == INVALID_HANDLE_VALUE;
+  my ($col, $row) = Win32::Console::_GetConsoleScreenBufferInfo($hOutput);
+  unless ($col && $row) {
+    $global->{last_errno} = $! = ENOTTY;
+    return TB_ERR_WIN_RESIZE;
   }
+  $global->{width}  = $col;
+  $global->{height} = $row;
+  return TB_OK;
+} #endif
 
   my ($rv, $ioctl_errno);
 
@@ -3289,8 +3312,9 @@ sub update_term_size {    # $int ()
 sub update_term_size_via_esc {    # $int ()
   state $sig = compile();
   $sig->(@_);
-  return TB_ERR_WIN_UNSUPPORTED if _WIN32;
-
+if (_WIN32) {
+  return TB_ERR_WIN_UNSUPPORTED;
+} #endif
   my $move_and_report = "\e[9999;9999H\e[6n";
 
   my $write_rv = POSIX::write(
@@ -3313,8 +3337,8 @@ sub update_term_size_via_esc {    # $int ()
   }
 
   my $buf = '';
-  my $read_rv = POSIX::read($global->{rfd}, $buf, TB_OPT_READ_BUF);
-  if (!defined($read_rv) || $read_rv < 1) {
+  my $read_rv = POSIX::read($global->{rfd}, $buf, TB_OPT_READ_BUF) // -1;
+  if ($read_rv < 1) {
     $global->{last_errno} = 0+ $!;
     return TB_ERR_RESIZE_READ;
   }
@@ -3426,128 +3450,128 @@ sub wait_event {    # $int ($event, $timeout)
   $rv = extract_event($event);
   return TB_OK if $rv == TB_OK;
 
-  if (_WIN32) {
-    my $hInput = $global->{rfd} // INVALID_HANDLE_VALUE;
-    if ($hInput == INVALID_HANDLE_VALUE) {
-      $^E = ERROR_INVALID_HANDLE;
-      $global->{last_errno} = $! = EBADF;
+if (_WIN32) {
+  my $hInput = $global->{rfd} // INVALID_HANDLE_VALUE;
+  if ($hInput == INVALID_HANDLE_VALUE) {
+    $^E = ERROR_INVALID_HANDLE;
+    $global->{last_errno} = $! = EBADF;
+    return TB_ERR_POLL;
+  }
+  my $ipc = bless(\$hInput, 'Win32::IPC');
+
+  do {
+    # WaitForSingleObject is used to wait for input events. The timeout is 
+    # specified in ms. If the timeout is negative, it will wait indefinitely.
+    $rv = $ipc->wait($timeout < 0 ? undef : $timeout);
+    if (!defined $rv) {
+      my $err = 0+ $^E;
+      if    ($err == ERROR_INVALID_HANDLE) { $! = EBADF  }
+      elsif ($err == ERROR_ACCESS_DENIED)  { $! = EACCES }
+      else                                 { $! = EINVAL }
+      $global->{last_errno} = 0+ $!;
+      return TB_ERR_POLL;
+    } elsif ($rv == 0) {
+      $global->{last_errno} = $! = 0;
+      return TB_ERR_NO_EVENT;
+    }
+
+    # Read wide input records from the console because higher-level console
+    # I/O is still not reliable for full Unicode input handling.
+    $^E = 0;
+    my $nevent = Win32::Console::_GetNumberOfConsoleInputEvents($hInput);
+    if ($^E) {
+      $global->{last_errno} = $! = EIO;
       return TB_ERR_POLL;
     }
-    my $ipc = bless(\$hInput, 'Win32::IPC');
+    while ($nevent--) {
+      my @ir = ReadConsoleInputW($hInput);
 
-    do {
-      # WaitForSingleObject is used to wait for input events. The timeout is 
-      # specified in ms. If the timeout is negative, it will wait indefinitely.
-      $rv = $ipc->wait($timeout < 0 ? undef : $timeout);
-      if (!defined $rv) {
-        my $err = 0+ $^E;
-        if    ($err == ERROR_INVALID_HANDLE) { $! = EBADF  }
-        elsif ($err == ERROR_ACCESS_DENIED)  { $! = EACCES }
-        else                                 { $! = EINVAL }
-        $global->{last_errno} = 0+ $!;
-        return TB_ERR_POLL;
-      } elsif ($rv == 0) {
-        $global->{last_errno} = $! = 0;
-        return TB_ERR_NO_EVENT;
-      }
+      # Skip null events
+      next unless @ir;
 
-      # Read wide input records from the console because higher-level console
-      # I/O is still not reliable for full Unicode input handling.
-      $^E = 0;
-      my $nevent = Win32::Console::_GetNumberOfConsoleInputEvents($hInput);
-      if ($^E) {
-        $global->{last_errno} = $! = EIO;
-        return TB_ERR_POLL;
-      }
-      while ($nevent--) {
-        my @ir = ReadConsoleInputW($hInput);
+      if ($ir[wEventType] == KEY_EVENT) {
+        # Discard key-up events unless Windows reports pasted text through 
+        # VK_MENU.
+        next 
+          unless $ir[bKeyDown]
+          || ($ir[wVirtualKeyCode] == VK_MENU && $ir[UnicodeChar]);
 
-        # Skip null events
-        next unless @ir;
+        # Discard pure modifier/lock key events only if they do not carry text
+        next if !$ir[UnicodeChar] && (
+              $ir[wVirtualKeyCode] == VK_SHIFT
+          || $ir[wVirtualKeyCode] == VK_CONTROL
+          || $ir[wVirtualKeyCode] == VK_MENU
+          || $ir[wVirtualKeyCode] == VK_CAPITAL
+          || $ir[wVirtualKeyCode] == VK_NUMLOCK
+          || $ir[wVirtualKeyCode] == VK_SCROLL
+          );
 
-        if ($ir[wEventType] == KEY_EVENT) {
-          # Discard key-up events unless Windows reports pasted text through 
-          # VK_MENU.
-          next 
-            unless $ir[bKeyDown]
-            || ($ir[wVirtualKeyCode] == VK_MENU && $ir[UnicodeChar]);
+        state $pending_high_surrogate;
+        while ($ir[wRepeatCount]--) {
+          my $wc = $ir[UnicodeChar];
 
-          # Discard pure modifier/lock key events only if they do not carry text
-          next if !$ir[UnicodeChar] && (
-               $ir[wVirtualKeyCode] == VK_SHIFT
-            || $ir[wVirtualKeyCode] == VK_CONTROL
-            || $ir[wVirtualKeyCode] == VK_MENU
-            || $ir[wVirtualKeyCode] == VK_CAPITAL
-            || $ir[wVirtualKeyCode] == VK_NUMLOCK
-            || $ir[wVirtualKeyCode] == VK_SCROLL
-            );
+          # Skip null characters
+          next if !$wc;
 
-          state $pending_high_surrogate;
-          while ($ir[wRepeatCount]--) {
-            my $wc = $ir[UnicodeChar];
-
-            # Skip null characters
-            next if !$wc;
-
-            # High surrogate
-            if ($wc >= 0xD800 && $wc <= 0xDBFF) {
-              $pending_high_surrogate = $wc;
-              next;
-            }
-
-            # Low surrogate
-            if ($wc >= 0xDC00 && $wc <= 0xDFFF) {
-              if (defined $pending_high_surrogate) {
-                my $high = $pending_high_surrogate;
-                $pending_high_surrogate = undef;
-                # combine surrogate pair to get the codepoint
-                my $codepoint =
-                  0x10000 + (($high - 0xD800) << 10) + ($wc - 0xDC00);
-                my $ch = chr($codepoint);
-                utf8::encode($ch);
-                bytebuf_nputs(\$global->{inbuf}, $ch, length($ch));
-                next;
-              }
-
-              # Ignore dangling low surrogates
-              next;
-            }
-
-            # Drop a previously pending high surrogate if a non-low-surrogate 
-            # arrives
-            $pending_high_surrogate = undef;
-
-            # Normal BMP character
-            my $ch = chr($wc);
-            utf8::encode($ch);
-            bytebuf_nputs(\$global->{inbuf}, $ch, length($ch));
+          # High surrogate
+          if ($wc >= 0xD800 && $wc <= 0xDBFF) {
+            $pending_high_surrogate = $wc;
+            next;
           }
-        }
-        elsif ($ir[wEventType] == WINDOW_BUFFER_SIZE_EVENT) {
-          $rv = update_term_size();
-          return $rv if $rv != TB_OK;
-          $rv = resize_cellbufs();
-          return $rv if $rv != TB_OK;
 
-          $event->{type} = TB_EVENT_RESIZE;
-          $event->{w}    = $global->{width};
-          $event->{h}    = $global->{height};
-          return TB_OK;
-        }
-        else {
-          # MOUSE_EVENT, FOCUS_EVENT, MENU_EVENT are ignored explicitly
-          next;
+          # Low surrogate
+          if ($wc >= 0xDC00 && $wc <= 0xDFFF) {
+            if (defined $pending_high_surrogate) {
+              my $high = $pending_high_surrogate;
+              $pending_high_surrogate = undef;
+              # combine surrogate pair to get the codepoint
+              my $codepoint =
+                0x10000 + (($high - 0xD800) << 10) + ($wc - 0xDC00);
+              my $ch = chr($codepoint);
+              utf8::encode($ch);
+              bytebuf_nputs(\$global->{inbuf}, $ch, length($ch));
+              next;
+            }
+
+            # Ignore dangling low surrogates
+            next;
+          }
+
+          # Drop a previously pending high surrogate if a non-low-surrogate 
+          # arrives
+          $pending_high_surrogate = undef;
+
+          # Normal BMP character
+          my $ch = chr($wc);
+          utf8::encode($ch);
+          bytebuf_nputs(\$global->{inbuf}, $ch, length($ch));
         }
       }
+      elsif ($ir[wEventType] == WINDOW_BUFFER_SIZE_EVENT) {
+        $rv = update_term_size();
+        return $rv if $rv != TB_OK;
+        $rv = resize_cellbufs();
+        return $rv if $rv != TB_OK;
 
-      %$event = %$empty_event;
-      $rv = extract_event($event);
-      return TB_OK if $rv == TB_OK;
+        $event->{type} = TB_EVENT_RESIZE;
+        $event->{w}    = $global->{width};
+        $event->{h}    = $global->{height};
+        return TB_OK;
+      }
+      else {
+        # MOUSE_EVENT, FOCUS_EVENT, MENU_EVENT are ignored explicitly
+        next;
+      }
+    }
 
-    } while ($timeout < 0);
+    %$event = %$empty_event;
+    $rv = extract_event($event);
+    return TB_OK if $rv == TB_OK;
 
-    return $rv;
-  }
+  } while ($timeout < 0);
+
+  return $rv;
+} #endif
 
   my $rfd      = $global->{rfd};
   my $resizefd = $global->{resize_pipefd}[0];
@@ -3578,8 +3602,8 @@ sub wait_event {    # $int ($event, $timeout)
 
     if ($tty_has_events) {
       my $buf = '';
-      my $read_rv = POSIX::read($rfd, $buf, TB_OPT_READ_BUF);
-      if (!defined($read_rv) || $read_rv < 0) {
+      my $read_rv = POSIX::read($rfd, $buf, TB_OPT_READ_BUF) // -1;
+      if ($read_rv < 0) {
         $global->{last_errno} = 0+ $!;
         return TB_ERR_READ;
       } elsif ($read_rv > 0) {
@@ -4162,13 +4186,15 @@ sub send_attr {    # $int ($fg, $bg)
       $cbg += 0xe7;
       last;
     };
-    case: TB_OPT_ATTR_W >= 32 && TB_OUTPUT_TRUECOLOR == $_ and do {
+if (TB_OPT_ATTR_W >= 32) {
+    case: TB_OUTPUT_TRUECOLOR() == $_ and do {
       $cfg = $fg & 0xffffff;
       $cbg = $bg & 0xffffff;
       $cfg = 0 if $fg & TB_HI_BLACK;
       $cbg = 0 if $bg & TB_HI_BLACK;
       last;
     };
+} # endif
     default: {
       $_ = TB_OUTPUT_NORMAL;
       goto DEFAULT;
@@ -4195,7 +4221,7 @@ sub send_attr {    # $int ($fg, $bg)
     $rv = bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_DIM]);
     return $rv if $rv != TB_OK;
   }
-  if (TB_OPT_ATTR_W == 64) {
+if (TB_OPT_ATTR_W == 64) {
     if ($fg & TB_STRIKEOUT) {
       $rv = bytebuf_puts(\$global->{outbuf}, 
         $global->{caps}[TB_HARDCAP_STRIKEOUT]);
@@ -4215,7 +4241,7 @@ sub send_attr {    # $int ($fg, $bg)
       $rv = bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_INVISIBLE]);
       return $rv if $rv != TB_OK;
     }
-  }
+} #endif
 
   if (($fg & TB_REVERSE) || ($bg & TB_REVERSE)) {
     $rv = bytebuf_puts(\$global->{outbuf}, $global->{caps}[TB_CAP_REVERSE]);
@@ -4227,12 +4253,12 @@ sub send_attr {    # $int ($fg, $bg)
     $fg_is_default = 0 if $fg & TB_HI_BLACK;
     $bg_is_default = 0 if $bg & TB_HI_BLACK;
   }
-  if (TB_OPT_ATTR_W >= 32) {
+if (TB_OPT_ATTR_W >= 32) {
     if ($global->{output_mode} == TB_OUTPUT_TRUECOLOR) {
       $fg_is_default = (($fg & 0xffffff) == 0) && (($fg & TB_HI_BLACK) == 0);
       $bg_is_default = (($bg & 0xffffff) == 0) && (($bg & TB_HI_BLACK) == 0);
     }
-  }
+} #endif
 
   $rv = send_sgr($cfg, $cbg, $fg_is_default, $bg_is_default);
   return $rv if $rv != TB_OK;
@@ -4291,7 +4317,8 @@ sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
       send_literal($rv, "m")                        == TB_OK or return $rv;
       last;
     };
-    case: TB_OPT_ATTR_W >= 32 && TB_OUTPUT_TRUECOLOR == $_ and do {
+if (TB_OPT_ATTR_W >= 32) {
+    case: TB_OUTPUT_TRUECOLOR() == $_ and do {
       send_literal($rv, "\x1b[")                    == TB_OK or return $rv;
       if (!$fg_is_default) {
         send_literal($rv, "38;2;")                  == TB_OK or return $rv;
@@ -4315,6 +4342,7 @@ sub send_sgr {    # $int ($cfg, $cbg, $fg_is_default, $bg_is_default)
       send_literal($rv, "m")                        == TB_OK or return $rv;
       last;
     };
+} #endif
     default: {
       $_ = TB_OUTPUT_NORMAL;
       goto DEFAULT;
@@ -4436,21 +4464,20 @@ sub bytebuf_flush {    # $int (\$buf, $fd)
   return TB_OK unless length($$b);
   my $want = length($$b);
   my $wrote;
-  if (_WIN32) {
-    my $hFile = $fd // INVALID_HANDLE_VALUE;
-    if (!Win32API::File::WriteFile($hFile, $$b, $want, $wrote, [])) {
-      my $err = 0+ $^E;
-      if    ($err == ERROR_INVALID_HANDLE)    { $! = EBADF  }
-      elsif ($err == ERROR_INVALID_PARAMETER) { $! = EINVAL }
-      elsif ($err == ERROR_BROKEN_PIPE)       { $! = EPIPE  }
-      else                                    { $! = EIO    }
-    }
+if (_WIN32) {
+  my $hFile = $fd // INVALID_HANDLE_VALUE;
+  if (!Win32API::File::WriteFile($hFile, $$b, $want, $wrote, [])) {
+    my $err = 0+ $^E;
+    if    ($err == ERROR_INVALID_HANDLE)    { $! = EBADF  }
+    elsif ($err == ERROR_INVALID_PARAMETER) { $! = EINVAL }
+    elsif ($err == ERROR_BROKEN_PIPE)       { $! = EPIPE  }
+    else                                    { $! = EIO    }
   }
-  else {
-    $wrote = POSIX::write($fd // -1, $$b, $want);
-  }
+} else {
+  $wrote = POSIX::write($fd // -1, $$b, $want) // 0;
+} #endif
   # Partial writes are treated as errors
-  if (!$wrote || $wrote != $want) {
+  if ($wrote != $want) {
     $global->{last_errno} = 0+ $!;
     return TB_ERR;
   }

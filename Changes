@@ -1,8 +1,15 @@
 Revision history for Termbox
 
-0.005000
+0.005001
+        2026-07-20
+        - Fix :colors export for TB_OPT_ATTR_W (32->16); thanks to David Cantrell
+        - Fix CRLF handling in t/00-begin.t (__DATA__ parsing broke on Unix)
+        - Ensure safe handling of global termbox filehandles during init/deinit
+        - Add TB_LIB_OPTS compile-time option to enforce consistent library defaults
+
+0.005
         2026-07-17
-        - Terminal: add Windows Virtual Terminal support (again)
+        - Terminal: add Windows Virtual Terminal support (again, see v0.3)
         - Change default wcwidth backend to builtin-based version
         - Fix escape sequence handling in extract_event (correct TB_ERR propagation)
         - Fix use :colors (as FFI) instead of :color when importing constants

@@ -6,6 +6,12 @@ use utf8;
 use Test::More;
 
 BEGIN {
+  # enable extended grapheme
+  $ENV{TB_LIB_OPTS} = 0;
+  $ENV{TB_OPT_EGC} = 1;
+}
+
+BEGIN {
   require_ok 'Termbox::PP';
   use_ok 'Termbox', qw( :api :return );
 }

@@ -70,10 +70,13 @@ The module offers a simple abstraction layer for:
 
 =back
 
-Unlike the original C implementation, C<Termbox::PP> is written entirely
-in pure Perl and does not require XS or external libraries. It depends
-only on core modules available since Perl 
-L<5.10|https://metacpan.org/release/DAPM/perl-5.10.1>.
+The module is implemented entirely in Perl and does not require XS or any 
+external C libraries. On Unix platforms it only depends on core modules 
+available since Perl L<v5.10|https://metacpan.org/release/DAPM/perl-5.10.1>. 
+
+On Windows platforms, the module requires additional dependencies for console 
+and file handling (usually included with Strawberry Perl), and L<Win32::IPC> for 
+event handling, which is available on CPAN.
 
 =head2 Features
 
@@ -1344,7 +1347,9 @@ environment variables is set:
 
   TB_OPT_EGC=0 perl your_script.pl
 
-Controls support for extended grapheme clusters (EGC).
+Controls support for extended grapheme clusters (EGC). 
+
+Default: disabled.
 
 =over
 
@@ -1409,8 +1414,7 @@ Typical values are:
   32   (extended / truecolor)
   64   (additional style attributes)
 
-This value is determined automatically based on the configuration and
-cannot be directly overridden in normal use.
+Default: 16 bits.
 
 =head2 TB_TERMINFO_DIR
 

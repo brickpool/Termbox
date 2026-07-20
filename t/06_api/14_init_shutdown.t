@@ -32,30 +32,28 @@ subtest 'tb_init_rwfd success path' => sub {
   plan tests => 3;
 
   local $Termbox::global->{initialized} = 0;
-  my @keep_alive;
+  my ($in, $out);
+  my ($rfd, $wfd, $ttyfd);
+  my $rv;
 
-  my ($in, $out) = (10, 11);
   if ($^O eq 'MSWin32') {
     require Fcntl;
-    sysopen(my $fh_in,  'CONIN$',  Fcntl::O_RDWR);
-    sysopen(my $fh_out, 'CONOUT$', Fcntl::O_RDWR);
-    push @keep_alive, $fh_in, $fh_out;
-    $in  = fileno($fh_in);
-    $out = fileno($fh_out);
-  }
-
-  is(
-    tb_init_rwfd($in, $out),
-    TB_OK,
-    'tb_init_rwfd returns TB_OK'
-  );
-
-  if ($^O eq 'MSWin32') {
     require Win32API::File;
-    $in = Win32API::File::FdGetOsFHandle($in);
-    $out = Win32API::File::FdGetOsFHandle($out);
+    sysopen($in,  'CONIN$',  Fcntl::O_RDWR);
+    sysopen($out, 'CONOUT$', Fcntl::O_RDWR);
+    $rfd = Win32API::File::GetOsFHandle($in);
+    $wfd = Win32API::File::GetOsFHandle($out);
+    $ttyfd = $wfd;
+    $rv = tb_init_rwfd(fileno($in), fileno($out)),
+  } 
+  else {
+    $rfd = 10;
+    $wfd = 11;
+    $ttyfd = $rfd;
+    $rv = tb_init_rwfd($rfd, $wfd);
   }
 
+  is($rv, TB_OK, 'tb_init_rwfd returns TB_OK');
   ok($Termbox::global->{initialized}, 'global initialized set');
   is_deeply(
     {
@@ -64,9 +62,9 @@ subtest 'tb_init_rwfd success path' => sub {
       ttyfd => $Termbox::global->{ttyfd},
     },
     {
-      rfd   => $in,
-      wfd   => $out,
-      ttyfd => $in,
+      rfd   => $rfd,
+      wfd   => $wfd,
+      ttyfd => $ttyfd,
     },
     'file descriptors stored correctly'
   );

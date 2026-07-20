@@ -26,7 +26,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v0.1.5');
-our $VERSION = version->declare('v0.5.0');
+our $VERSION = version->declare('v0.5.1');
 
 # authority '...'
 our $authority = 'github:raku-community-modules';
