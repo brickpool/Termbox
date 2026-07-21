@@ -9,8 +9,8 @@ example/lavat.pl
 lib/Termbox/PP.pm
 lib/Termbox/PP.pod
 lib/Termbox/PP/Terminfo/Builtin.pm
-lib/Termbox/PP/WCWidth.pm
-lib/Termbox/PP/WCWidth/Tables.pm
+lib/Terminal/WCWidth.pm
+lib/Terminal/WCWidth/Tables.pm
 LICENSE
 Makefile.PL
 MANIFEST

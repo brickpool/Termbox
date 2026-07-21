@@ -6,14 +6,14 @@
 #
 #   Copyright (c) 2007 Markus Kuhn (Unicode 5.0)
 #                 2014 Jeff Quast <contact@jeffquast.com>
-#                 2015 bluebear94 <tkook11@gmail.com>
-#                 2026 Elizabeth Mattijsen <lizmat@mastodon.social>
+#                 2015-2017 +merlan #flirora <http://flirora.xyz/>
+#                 2020,2024 Raku Community
 #
 # ------------------------------------------------------------------------
 #   Author: 2024-2026 J. Schneider
 # ------------------------------------------------------------------------
 
-package Termbox::PP::WCWidth;
+package Terminal::WCWidth;
 
 # ------------------------------------------------------------------------
 # Boilerplate ------------------------------------------------------------
@@ -26,7 +26,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v0.1.5');
-our $VERSION = version->declare('v0.5.1');
+our $VERSION = version->declare('v0.5.2');
 
 # authority '...'
 our $authority = 'github:raku-community-modules';
@@ -36,7 +36,8 @@ our $AUTHORITY = 'github:brickpool';
 # Imports ----------------------------------------------------------------
 # ------------------------------------------------------------------------
 
-use Termbox::PP::WCWidth::Tables;
+use Unicode::Normalize qw( NFC );
+use Terminal::WCWidth::Tables;
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
@@ -61,18 +62,6 @@ our @EXPORT_OK = qw(
 
 our %EXPORT_TAGS = (
   all => \@EXPORT_OK,
-);
-
-# ------------------------------------------------------------------------
-# Constants --------------------------------------------------------------
-# ------------------------------------------------------------------------
-
-# STRICT is a global flag that enables strict argument checking.
-use constant STRICT => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
-  PERL_STRICT
-  EXTENDED_TESTING
-  AUTHOR_TESTING
-  RELEASE_TESTING
 );
 
 # ------------------------------------------------------------------------
@@ -103,17 +92,20 @@ my %cache = ();
 sub wcwidth {    # $result ($ucs)
   my ($ucs) = @_;
 
-  return -1 if STRICT && (!defined $ucs || ref $ucs);
-  return -1 if STRICT && $ucs !~ /\A\d+\z/;
+  return -1 
+    if !defined $ucs || ref $ucs;
 
-  return -1 if $ucs < 0 || $ucs > 0x10ffff;
-  return -1 if STRICT && $ucs >= 0xD800 && $ucs <= 0xDFFF;
+  return -1 
+    if ($ucs < 0 || $ucs > 0x10ffff) 
+    || ($ucs >= 0xD800 && $ucs <= 0xDFFF);
 
   return $cache{$ucs} if exists $cache{$ucs};
 
   return ($cache{$ucs} = 0)
     if $ucs == 0
     || $ucs == 0x034f
+    || $ucs == 0x2028
+    || $ucs == 0x2029
     || (0x200b <= $ucs && $ucs <= 0x200f)
     || (0x202a <= $ucs && $ucs <= 0x202e)
     || (0x2060 <= $ucs && $ucs <= 0x2063);
@@ -129,12 +121,20 @@ sub wcwidth {    # $result ($ucs)
 
 sub wcswidth {    # $result ($str)
   my ($str) = @_;
-
+  $str = NFC($str);
   my $res = 0;
+  my $prev_w = 0;
   for (split //, $str) {
-    my $w = wcwidth(ord $_);
+    my $cp = ord($_);
+    if ($cp == 0xfe0f && $prev_w == 1) {
+      $res += 1;
+      $prev_w = 0;
+      next;
+    }
+    my $w = wcwidth($cp);
     return -1 if $w < 0;
     $res += $w;
+    $prev_w = $w;
   }
   return $res;
 }
@@ -147,7 +147,7 @@ __END__
 
 =head1 NAME
 
-Termbox::PP::WCWidth - determine columns needed for a wide character
+Terminal::WCWidth - determine columns needed for a wide character
 
 =head1 DESCRIPTION
 
@@ -194,7 +194,7 @@ Takes a I<string> and outputs its total width:
 
 Returns -1 if any control characters are found.
 
-Unlike the Python version, this module does not support getting the width of
+Unlike the original version, this module does not support getting the width of
 only the first C<n> characters of a string, as you can use the C<substr>
 method.
 
@@ -205,7 +205,12 @@ method.
  Copyright (c) 2007 by Markus Kuhn
 
  This library content was taken from the Terminal::WCWidth implementation of 
- Perl 6 which is licensed under MIT licence.
+ Raku (a Python port) which is licensed under MIT license.
+
+ Copyright (c) 2014 Jeff Quast
+               2015-2017 +merlan #flirora
+               2020,2024 Raku Commuity
+               2024-2026 J. Schneider
 
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),
@@ -221,9 +226,17 @@ method.
 
 =over
 
-=item * 2015 by bluebear94 E<lt>tkook11@gmail.comE<gt>
+=item * Markus Kuhn
 
-=item * 2024-2026 by J. Schneider L<https://github.com/brickpool/>
+=item * Jeff Quast
+
+=item * +merlan #flirora
+
+=item * José Joaquín Atria
+
+=item * Raku Community
+
+=item * J. Schneider L<https://github.com/brickpool/>
 
 =back
 
@@ -247,6 +260,6 @@ L<wcwidth.c|https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c>
 
 L<Text::CharWidth>
 
-L<Terminal::WCWidth|https://github.com/bluebear94/Terminal-WCWidth>
+L<Terminal::WCWidth|https://github.com/raku-community-modules/Terminal-WCWidth>
 
 =cut

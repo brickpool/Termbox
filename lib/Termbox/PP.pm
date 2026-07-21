@@ -28,7 +28,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.5.1');
+our $VERSION = version->declare('v0.5.2');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -68,18 +68,16 @@ use constant STRICT => !!grep { exists $ENV{$_} && $ENV{$_} } qw(
   RELEASE_TESTING
 );
 
-# The following compile-time options are available for conditional code. 
-# They are set to the default values used in the C implementation, but can be 
-# overridden by setting the corresponding environment variables before loading 
-# this module.
+# The following compile-time options are available for conditional code.
+# Their defaults are derived from the original C implementation and the
+# current Perl configuration, but may be overridden through environment
+# variables before loading this module.
 
 # Ensure consistent compile-time options
-use constant TB_LIB_OPTS => 
-  exists $ENV{TB_LIB_OPTS} && $ENV{TB_LIB_OPTS} ? 1 : 0;
+use constant TB_LIB_OPTS => $ENV{TB_LIB_OPTS} ? 1 : 0;
 
 # Deprecated. Sets TB_OPT_ATTR_W to 32 if not already set.
-use constant TB_OPT_TRUECOLOR => 
-  exists $ENV{TB_OPT_TRUECOLOR} && $ENV{TB_OPT_TRUECOLOR} ? 1 : 0;
+use constant TB_OPT_TRUECOLOR => $ENV{TB_OPT_TRUECOLOR} ? 1 : 0;
 
 # Integer width of fg and bg attributes. Valid values (assuming system support) 
 # are 16, 32, and 64. 32 or 64 enables output mode TB_OUTPUT_TRUECOLOR. 
@@ -94,8 +92,7 @@ use constant TB_OPT_ATTR_W =>
 
 # If set, enable extended grapheme cluster support (tb_extend_cell, 
 # tb_set_cell_ex). Consumes more memory. Defaults off.
-use constant TB_OPT_EGC => !TB_LIB_OPTS 
-  && exists $ENV{TB_OPT_EGC} && $ENV{TB_OPT_EGC} ? 1 : 0;
+use constant TB_OPT_EGC => TB_LIB_OPTS || ($ENV{TB_OPT_EGC} ? 1 : 0);
 
 # Write buffer size for printf operations. Represents the largest string that 
 # can be sent in one call to tb_print and tb_send functions. Defaults to 4096.
@@ -110,7 +107,7 @@ use constant TB_OPT_READ_BUF => !TB_LIB_OPTS
 # Unicode-aware versions. Note, Unicode::UCD are version-dependent and must 
 # support prop_invmap and search_invlist. Defaults to built-in.
 use constant TB_OPT_LIBC_WCHAR => !TB_LIB_OPTS 
-  && exists $ENV{TB_OPT_LIBC_WCHAR} && $ENV{TB_OPT_LIBC_WCHAR} 
+  && $ENV{TB_OPT_LIBC_WCHAR} 
   && Unicode::UCD->can('prop_invmap') 
   && Unicode::UCD->can('search_invlist') ? 1 : 0;
 
@@ -719,7 +716,7 @@ use vars qw( $global );
 # Utility functions ------------------------------------------------------
 # ------------------------------------------------------------------------
 
-BEGIN { require Termbox::PP::WCWidth unless TB_OPT_LIBC_WCHAR }
+BEGIN { require Terminal::WCWidth unless TB_OPT_LIBC_WCHAR }
 
 # Determine if the current locale is CJK, which affects the width of 
 # 'A' (Ambiguous) characters.
@@ -2555,7 +2552,7 @@ sub tb_wcwidth {    # $int ($codepoint)
 if (TB_OPT_LIBC_WCHAR) {
   return wcwidth($codepoint);
 } else {
-  return Termbox::PP::WCWidth::wcwidth($codepoint);
+  return Terminal::WCWidth::wcwidth($codepoint);
 } #endif
 }
 
@@ -2760,7 +2757,7 @@ if (TB_OPT_LIBC_WCHAR) {
     return 0;
   }
 
-  my $w = Termbox::PP::WCWidth::wcwidth($ch);
+  my $w = Terminal::WCWidth::wcwidth($ch);
   $$width = $w if defined $width;
   return $w >= 0 ? 1 : 0;
 } #endif

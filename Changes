@@ -1,5 +1,12 @@
 Revision history for Termbox
 
+0.005002
+        2026-07-21
+        - Rename Termbox::PP::WCWidth to Terminal::WCWidth
+        - Improve Unicode width calculation in Terminal::WCWidth
+        - Fix TB_OPT_EGC handling when TB_LIB_OPTS is enabled
+        - Improve POD documentation, including TB_LIB_OPTS behavior
+
 0.005001
         2026-07-20
         - Fix :colors export for TB_OPT_ATTR_W (32->16); thanks to David Cantrell

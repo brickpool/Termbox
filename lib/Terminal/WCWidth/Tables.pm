@@ -1,4 +1,4 @@
-package Termbox::PP::WCWidth::Tables;
+package Terminal::WCWidth::Tables;
 use strict;
 use warnings;
 

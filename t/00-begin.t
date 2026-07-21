@@ -132,9 +132,11 @@ IO::File
 Params::Check
 Scalar::Util
 POSIX
+Unicode::Normalize
 Unicode::UCD
 utf8
 vars
+version
 
 Test::More
 Data::Dumper
