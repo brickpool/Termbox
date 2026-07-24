@@ -75,8 +75,7 @@ external C libraries. On Unix-like platforms it only depends on core modules
 available since Perl L<v5.10|https://metacpan.org/release/DAPM/perl-5.10.1>. 
 
 On Windows platforms, the module requires additional dependencies for console 
-and file handling (usually included with Strawberry Perl), and L<Win32::IPC> for 
-event handling, which is available on CPAN.
+and file handling (usually included with Strawberry Perl).
 
 =head2 Features
 
@@ -2335,10 +2334,6 @@ L<Win32::API>
 =item *
 
 L<Win32API::File>
-
-=item *
-
-L<Win32::IPC>
 
 =back
 

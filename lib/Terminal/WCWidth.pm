@@ -26,7 +26,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v0.1.5');
-our $VERSION = version->declare('v0.5.2');
+our $VERSION = version->declare('v0.5.3');
 
 # authority '...'
 our $authority = 'github:raku-community-modules';
@@ -256,9 +256,11 @@ L<5.010|https://metacpan.org/release/DAPM/perl-5.10.1>
 
 =head1 SEE ALSO
 
-L<wcwidth.c|https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c>
-
 L<Text::CharWidth>
+
+L<Text::VisualWidth::PP>
+
+L<wcwidth.c|https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c>
 
 L<Terminal::WCWidth|https://github.com/raku-community-modules/Terminal-WCWidth>
 

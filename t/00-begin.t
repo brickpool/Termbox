@@ -147,13 +147,14 @@ Encode
 lib
 List::Util
 Pod::Usage
+threads
 Time::HiRes
+Unicode::EastAsianWidth
 Unicode::EastAsianWidth::Detect
 
 Win32::API
 Win32::Console
 Win32API::File
-Win32::IPC
 
 $LANG
 $LOCALE
