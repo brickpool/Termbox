@@ -125,9 +125,7 @@ bytes
 Carp
 constant
 Config
-Errno
 Exporter
-Fcntl
 IO::File
 Params::Check
 Scalar::Util

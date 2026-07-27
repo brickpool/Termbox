@@ -28,7 +28,7 @@ use warnings;
 # version '...'
 use version;
 our $version = version->declare('v2.7.0_0');
-our $VERSION = version->declare('v0.5.3');
+our $VERSION = version->declare('v0.5.4');
 
 # authority '...'
 our $authority = 'github:adsr';
@@ -41,11 +41,9 @@ our $AUTHORITY = 'github:brickpool';
 require bytes;
 use Carp ();
 use Config;
-use Errno ();
-use Fcntl;
 use IO::File ();
 use Params::Check ();
-use POSIX qw( :termios_h );
+use POSIX qw( :termios_h :fcntl_h );
 use Scalar::Util qw( blessed );
 use Unicode::UCD ();
 use utf8;
@@ -705,6 +703,19 @@ use constant {
   TYPE_MAX   => 3,
 };
 
+# Standard error codes (POSIX errors)
+use constant {
+  EIO     => defined(&POSIX::EIO)        ? POSIX::EIO()        : 5,
+  EBADF   => defined(&POSIX::EBADF)      ? POSIX::EBADF()      : 9,
+  EACCES  => defined(&POSIX::EACCES)     ? POSIX::EACCES()     : 13,
+  EINVAL  => defined(&POSIX::EINVAL)     ? POSIX::EINVAL()     : 22,
+  ENOTTY  => defined(&POSIX::ENOTTY)     ? POSIX::ENOTTY()     : 25,
+  EPIPE   => defined(&POSIX::EPIPE)      ? POSIX::EPIPE()      : 32,
+  ENOTSUP => defined(&POSIX::ENOTSUP)    ? POSIX::ENOTSUP()    : 
+             defined(&POSIX::EOPNOTSUPP) ? POSIX::EOPNOTSUPP() : 
+             95,
+};
+
 # ------------------------------------------------------------------------
 # Globals ----------------------------------------------------------------
 # ------------------------------------------------------------------------
@@ -928,17 +939,6 @@ use if _WIN32, 'Win32API::File', qw(
   :FILE_TYPE_
 );
 
-# Standard error codes (POSIX errors)
-use if _WIN32, constant => {
-  EIO        => exists(&Errno::EIO)        ? &Errno::EIO        : 5,
-  EBADF      => exists(&Errno::EBADF)      ? &Errno::EBADF      : 9,
-  EACCES     => exists(&Errno::EACCES)     ? &Errno::EACCES     : 13,
-  EINVAL     => exists(&Errno::EINVAL)     ? &Errno::EINVAL     : 22,
-  ENOTTY     => exists(&Errno::ENOTTY)     ? &Errno::ENOTTY     : 25,
-  EPIPE      => exists(&Errno::EPIPE)      ? &Errno::EPIPE      : 32,
-  EOPNOTSUPP => exists(&Errno::EOPNOTSUPP) ? &Errno::EOPNOTSUPP : 95,
-};
-
 # Windows Error Codes
 use if _WIN32, constant => {
   ERROR_ACCESS_DENIED     => 0x5,
@@ -1102,7 +1102,7 @@ if (TB_OPT_EGC) {
   *Termbox::Cell::nech = sub {
     my $ch = $_[0]->[0];
     my $n = length($ch);
-    return ($ch =~ /\A\X\z/ && $n > 1) ? $n : 0;
+    return ($n && $ch =~ /\A\X\z/) ? $n : 0;
   };
   *Termbox::Cell::cech = sub {
     my $ech = $_[0]->ech;
@@ -1217,8 +1217,9 @@ sub cellbuf::clear {    # $int ()
   my ($c) = $sig->(@_);
   my $rv;
   for my $i (0 .. $c->{width}*$c->{height}-1) {
-    return $rv if $rv = $c->{cells}[$i]->set(' ', $global->{fg}, $global->{bg});
+    $c->{cells}[$i]->set(' ', $global->{fg}, $global->{bg});
   }
+  $global->{dirty_lines} = [ (1) x ($c->{height} || 0) ];
   return TB_OK;
 }
 
@@ -1474,13 +1475,16 @@ $global = {
 
   # (Error) state
   last_errno  => 0,
-  errbuf      => "",
   initialized => 0,
   # ->{errbuf} is not needed
 
   # Custom callbacks for escape sequence parsing
   fn_extract_esc_pre  => undef,
   fn_extract_esc_post => undef,
+
+  # Dirty lines tracking for efficient rendering
+  full_repaint => 0,
+  dirty_lines  => [],
 };
 
 # ------------------------------------------------------------------------
@@ -1680,7 +1684,7 @@ sub tb_init_file {    # $int ($path)
   state $sig = compile(
     _Str,
   );
-  my ($path) =$sig->(@_);
+  my ($path) = $sig->(@_);
   return TB_ERR_INIT_ALREADY if $global->{initialized};
 if (_WIN32) {
   return TB_ERR_WIN_UNSUPPORTED;
@@ -1752,12 +1756,14 @@ if (_WIN32) {
       $global->{last_errno} = $! = EBADF;
       last;
     };
-    case: TB_ERR_WIN_GET_CONMODE() == $_ and do {
+    case: TB_ERR_WIN_GET_CONMODE() == $_ ||
+          TB_ERR_WIN_SET_CONMODE() == $_ 
+    and do {
       $global->{last_errno} = $! = ENOTTY;
       last;
     };
     case: TB_ERR_WIN_UNSUPPORTED() == $_ and do {
-      $global->{last_errno} = $! = EOPNOTSUPP;
+      $global->{last_errno} = $! = ENOTSUP;
       last;
     };
     default: {
@@ -1856,21 +1862,23 @@ sub tb_present {    # $int ()
 
   my $rv;
 
-  # TODO: assert $global->{back}[width,height] == global->{front}[width,height]
+  # TODO: assert $global->{back}[width,height] == $global->{front}[width,height]
 
-  my $front       = $global->{front};
-  my $back        = $global->{back};
-  my $front_cells = $front->{cells};
-  my $back_cells  = $back->{cells};
-  my $width       = $front->{width};
-  my $height      = $front->{height};
+  my $full_repaint = $global->{full_repaint};
+  my $dirty_lines  = $global->{dirty_lines};
+  my $front        = $global->{front};
+  my $back         = $global->{back};
+  my $front_cells  = $front->{cells};
+  my $back_cells   = $back->{cells};
+  my $width        = $front->{width};
+  my $height       = $front->{height};
 
   $global->{last_x} = -1;
   $global->{last_y} = -1;
 
-  my @last = ("\0", ~0, ~0);
-
   for (my $y = 0; $y < $height; $y++) {
+    # Skip lines that are not dirty unless we are doing a full repaint
+    next unless $full_repaint || $dirty_lines->[$y];
     my $line_offset = $y * $width;
 
     for (my $x = 0; $x < $width; ) {
@@ -1906,10 +1914,7 @@ if (TB_OPT_EGC &&
       ) {
         @$front_cell = @$back_cell;
 
-        if ($back_cell->[1] != $last[1] || $back_cell->[2] != $last[2]) {
-          send_attr($back_cell->[1], $back_cell->[2]);
-          @last = @$back_cell;
-        }
+        send_attr($back_cell->[1], $back_cell->[2]);
         if ($w > 1 && $x >= $width - ($w - 1)) {
           # Not enough room for wide char, send spaces
           for (my $i = $x; $i < $width; $i++) {
@@ -1942,6 +1947,7 @@ if (TB_OPT_EGC &&
       }
       $x += $w;
     }
+    $dirty_lines->[$y] = 0;
   }
 
   $rv = send_cursor_if($global->{cursor_x}, $global->{cursor_y});
@@ -2038,12 +2044,13 @@ sub tb_set_cell_ex {    # $int ($x, $y, $ch, $nch, $fg, $bg)
   );
   my ($x, $y, $ch, $nch, $fg, $bg) = $sig->(@_);
   # Note: ch is a Perl string, not an array of codepoints
-  # Note: nch is accepted for API compatibility but ignored in the Perl port
+  # and nch is accepted for API compatibility but ignored in the Perl port
   return TB_ERR_NOT_INIT unless $global->{initialized};
   my $rv;
   my $cell;
   $rv = cellbuf_get($global->{back}, $x, $y, \$cell);
   return $rv if $rv != TB_OK;
+  $global->{dirty_lines}[$y] = 1;
   $rv = $cell->set($ch, $fg, $bg);
   return $rv if $rv != TB_OK;
   return TB_OK;
@@ -2063,6 +2070,7 @@ if (TB_OPT_EGC) {
   my $cell;
   $rv = cellbuf_get($global->{back}, $x, $y, \$cell);
   return $rv if $rv != TB_OK;
+  $global->{dirty_lines}[$y] = 1;
   # Note: tb_extend_cell appends only the first Perl character
   $cell->[0] .= substr($ch, 0, 1);
   return TB_OK;
@@ -2331,8 +2339,10 @@ sub tb_set_func {    # $int ($fn_type, $fn)
   my ($fn_type, $fn) = $sig->(@_);
 
   state $warned = 0;
-  warn "tb_set_func() is deprecated and may be removed in a future release\n" 
-    if STRICT && !$warned++;
+  warnings::warnif(
+    deprecated =>
+      "tb_set_func() is deprecated and may be removed in a future release"
+  ) unless $warned++;
 
   switch: for ($fn_type) {
     case: TB_FUNC_EXTRACT_PRE == $_ and do {
@@ -2519,12 +2529,19 @@ sub tb_cell_buffer {    # \@ ()
   $sig->(@_);
 
   state $warned = 0;
-  warn "tb_cell_buffer() is deprecated; ".
-       "use tb_get_cell() and related APIs instead\n"
-    if STRICT && !$warned++;
+  warnings::warnif(
+    deprecated =>
+      "tb_cell_buffer() is deprecated; ".
+      "use tb_get_cell() and related APIs instead"
+  ) unless $warned++;
 
   my $back = $global->{back};
   return [] unless ref($back) eq 'cellbuf' && ref($back->{cells}) eq 'ARRAY';
+  # Exposing the back buffer allows callers to modify it without going through 
+  # the normal APIs. Dirty tracking can no longer be considered reliable, 
+  # therefore all future tb_present() calls use full repaint mode until 
+  # tb_reset().
+  $global->{full_repaint} = 1;
   return $back->{cells};
 }
 
@@ -2622,11 +2639,13 @@ sub tb_reset {    # $int ()
     has_orig_tios => 0,
 
     last_errno    => 0,
-    errbuf        => '',
     initialized   => 0,
 
     fn_extract_esc_pre  => undef,
     fn_extract_esc_post => undef,
+
+    full_repaint => 0,
+    dirty_lines  => [],
   };
 
   return TB_OK;
@@ -2745,10 +2764,15 @@ if (!_WIN32) {
   return TB_OK;
 }
 
-END { if ($global->{initialized}) {
-  if (STRICT) { warn "tb_shutdown() not called before program exit\n"; sleep 2 }
-  tb_deinit();
-}}
+END {
+  return unless $global && $global->{initialized};
+  if (STRICT) {
+    warn "tb_shutdown() not called before program exit\n";
+    sleep 2;
+  }
+  local $@;
+  eval { tb_deinit() };
+}
 
 sub tb_iswprint_ex {    # $bool ($ch, \$width|undef)
   state $sig = compile(
@@ -3243,10 +3267,13 @@ if (_WIN32) {
     $global->{last_errno} = 0+ $!;
     return TB_ERR_RESIZE_PIPE;
   }
-
   $global->{resize_pipefd} = [$rfd, $wfd];
 
-  $SIG{WINCH} = \&handle_resize if exists $SIG{WINCH};
+  unless (exists $SIG{WINCH}) {
+    $global->{last_errno} = $! = EACCES;
+    return TB_ERR_RESIZE_SIGACTION;
+  }
+  $SIG{WINCH} = \&handle_resize;
   return TB_OK;
 }
 
@@ -3254,6 +3281,7 @@ sub resize_cellbufs {    # $int ()
   state $sig = compile();
   $sig->(@_);
   my $rv;
+  $global->{dirty_lines} = [ (1) x ($global->{height} || 0) ];
   $rv = cellbuf_resize($global->{back}, $global->{width}, $global->{height});
   return $rv if $rv != TB_OK;
   $rv = cellbuf_resize($global->{front}, $global->{width}, $global->{height});
@@ -3334,10 +3362,11 @@ if (_WIN32) {
     $global->{wfd},
     $move_and_report,
     length($move_and_report),
-  );
-  return TB_ERR_RESIZE_WRITE
-    if !defined($write_rv) 
-    || $write_rv != length($move_and_report);
+  ) // 0;
+  if ($write_rv != length($move_and_report)) {
+    $global->{last_errno} = 0+ $!;
+    return TB_ERR_RESIZE_WRITE;
+  }
 
   my $rin = '';
   vec($rin, $global->{rfd}, 1) = 1;
@@ -3357,6 +3386,7 @@ if (_WIN32) {
   }
 
   if ($buf !~ /\e\[(\d+);(\d+)R/) {
+    $global->{last_errno} = $! = EIO;
     return TB_ERR_RESIZE_SSCANF;
   }
   my ($rh, $rw) = ($1, $2);
@@ -4068,6 +4098,7 @@ sub init_cellbuf {    # $int ()
   $global->{back}  ||= cellbuf->new();
   $global->{front} ||= cellbuf->new();
 
+  $global->{dirty_lines} = [ (1) x ($global->{height} || 0) ];
   $rv = $global->{back}->init($global->{width}, $global->{height});
   return $rv if $rv != TB_OK;
   $rv = $global->{front}->init($global->{width}, $global->{height});
