@@ -1,5 +1,12 @@
 Revision history for Termbox
 
+0.6     2026-07-28
+        - Added DEBUG(), TRACE(), and TRACE_LEAVE() helper functions.
+        - Added configurable debug tracing via TB_DEBUG_LEVEL.
+        - Added Termbox::tb_debug_handler() callback interface.
+        - Added optional tracing of public tb_* API calls and return values.
+        - Added ACKNOWLEDGEMENT section to the POD documentation.
+
 0.5.4   2026-07-27
         - Add dirty lines tracking for efficient rendering
         - Use warnings::warnif() for deprecation warnings
