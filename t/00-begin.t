@@ -150,6 +150,7 @@ Time::HiRes
 Unicode::EastAsianWidth
 Unicode::EastAsianWidth::Detect
 
+Win32
 Win32::API
 Win32::Console
 Win32API::File

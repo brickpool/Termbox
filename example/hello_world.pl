@@ -6,6 +6,20 @@ use warnings;
 use Getopt::Long qw( GetOptions );
 use Pod::Usage;
 
+BEGIN {
+  if ($^O eq 'MSWin32') {
+    require Win32;
+    $ENV{TB_OPT_DEBUG} //= 2;
+    *Termbox::tb_debug_handler = sub { 
+      Win32::OutputDebugString(sprintf shift, @_)
+    };
+  } else {
+    *Termbox::tb_debug_handler = sub {
+      printf STDERR shift, @_;
+    };
+  }
+}
+
 use lib '../lib', 'lib';
 use Termbox::PP;
 

@@ -1462,6 +1462,23 @@ Disabled.
 
 By default, C<TB_LIB_OPTS> is disabled.
 
+=head2 TB_OPT_DEBUG
+
+Specifies the runtime debugging and tracing level.
+
+A value of C<0> disables all debugging output. Higher values enable 
+progressively more detailed diagnostic information.
+
+The exact meaning of individual levels is implementation-defined and may vary 
+between releases. In general, higher levels produce more verbose output, 
+including tracing of C<tb_*> function calls.
+
+Debug output is delivered through the user-defined
+C<Termbox::tb_debug_handler()> callback.
+
+If C<PERL_NDEBUG> or C<NDEBUG> is set, debugging support is disabled
+regardless of the value of C<TB_OPT_DEBUG>.
+
 =head2 TB_TERMINFO_DIR
 
   TB_TERMINFO_DIR=/custom/path perl your_script.pl
@@ -2347,6 +2364,17 @@ J. Schneider E<lt>L<http://github.com/brickpool>E<gt>
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  DEALINGS IN THE SOFTWARE.
+
+=head1 ACKNOWLEDGEMENT
+
+The tracing and debugging helpers were inspired by the debug macro
+design used by C<libserialport>.
+
+The positional parameter checking API provided by C<compile()> was
+inspired by L<Type::Params>.
+
+Several template names follow conventions established by
+L<Types::Standard> and L<Types::Common>.
 
 =head1 REQUIRES
 
