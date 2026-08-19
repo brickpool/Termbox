@@ -146,7 +146,7 @@ __END__
 
 =head1 NAME
 
-paint.pl - sample script for the Termbox::Go module!
+paint.pl - sample script for the Termbox::PP module!
 
 =head1 SYNOPSIS
 
@@ -154,7 +154,7 @@ paint.pl - sample script for the Termbox::Go module!
 
 =head1 DESCRIPTION
 
-This is a Termbox::Go example script, see L<Termbox::Go> for details.
+This is a Termbox::PP example script, see L<Termbox::PP> for details.
 
 =head1 OPTIONS
 

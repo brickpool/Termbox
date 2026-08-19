@@ -293,7 +293,7 @@ output.pl - sample script that shows the termbox output modes.
 
 =head1 DESCRIPTION
 
-This is a Termbox::Go example script, see L<Termbox::Go> for details.
+This is a Termbox::PP example script, see L<Termbox::PP> for details.
 
 =head1 OPTIONS
 

@@ -71,7 +71,8 @@ sub byte_slice_insert { # $octets ($text, $offset, $what)
 
 package EditBox {
 
-use 5.014;
+use 5.010;
+use strict;
 use warnings;
 
 require bytes;
@@ -433,7 +434,7 @@ __END__
 
 =head1 NAME
 
-editbox.pl - sample script for the Termbox::Go module!
+editbox.pl - sample script for the Termbox::PP module!
 
 =head1 SYNOPSIS
 
@@ -441,7 +442,7 @@ editbox.pl - sample script for the Termbox::Go module!
 
 =head1 DESCRIPTION
 
-This is a Termbox::Go example script, see L<Termbox::Go> for details.
+This is a Termbox::PP example script, see L<Termbox::PP> for details.
 
 =head1 OPTIONS
 
