@@ -120,9 +120,10 @@ use constant TB_RESIZE_FALLBACK_MS => exists $ENV{TB_RESIZE_FALLBACK_MS}
   : 1000;
 
 # Retrieve the debug level from the environment variable TB_DEBUG_LEVEL. 
-use constant _DEBUG => $ENV{TB_DEBUG_LEVEL} && !$ENV{PERL_NDEBUG} && !$ENV{NDEBUG} 
-  ? ($ENV{TB_DEBUG_LEVEL} || 0)
-  : 0;
+use constant _DEBUG => exists $ENV{TB_DEBUG_LEVEL} 
+  && !$ENV{PERL_NDEBUG} && !$ENV{NDEBUG} 
+    ? ($ENV{TB_DEBUG_LEVEL} || 0)
+    : 0;
 
 # ------------------------------------------------------------------------
 # Exports ----------------------------------------------------------------
@@ -3440,7 +3441,14 @@ if (_WIN32) {
     $global->{last_errno} = $! = EACCES;
     return TB_ERR_RESIZE_SIGACTION;
   }
-  $SIG{WINCH} = \&handle_resize;
+  $SIG{WINCH} = do {
+    state $signo = do {
+      my %sig_num;
+      @sig_num{ split(' ', $Config{sig_name}) } = split(' ', $Config{sig_num});
+      $sig_num{WINCH} // 28;
+    };
+    sub { handle_resize($signo) };
+  };
   return TB_OK;
 }
 
