@@ -41,6 +41,10 @@ WriteMakefile1(
         web => 'https://github.com/brickpool/Termbox/issues',
       },
     },
+    provides => {
+      'Terminal::WCWidth' 
+        => { file => 'lib/Terminal/WCWidth.pm', version => '0.1.5' },
+    },
     prereqs => {
       runtime => {
         requires => {    # v5.10 builtin modules
@@ -67,7 +71,7 @@ WriteMakefile1(
           'lib'                             => 0,
           'List::Util'                      => 0,
           'Pod::Usage'                      => 0,
-          'threads'                         => 0,
+#          'threads'                         => 0,
           'Time::HiRes'                     => 0,
           'Unicode::EastAsianWidth'         => 0,
           'Unicode::EastAsianWidth::Detect' => 0,
