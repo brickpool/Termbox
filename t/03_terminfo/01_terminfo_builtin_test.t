@@ -34,10 +34,25 @@ for my $name (@builtin_terms_orders) {
   );
 }
 
-SKIP: {
-  skip 'TERM not set', 3 unless $ENV{TERM};
-  my $rv = Termbox::load_builtin_caps();
-  is($rv, TB_OK(), 'load_builtin_caps() returns TB_OK');
-}
+subtest 'load_builtin_caps' => sub {
+  local $Termbox::global->{caps} = [];
+  local $ENV{TERM} = 'xterm';
+  is(Termbox::load_builtin_caps(), TB_OK(), 'exact builtin TERM is supported');
+  is_deeply($Termbox::global->{caps}, $builtin_terms{xterm},
+    'exact match loads xterm capabilities');
+
+  $ENV{TERM} = 'xterm-256color';
+  is(Termbox::load_builtin_caps(), TB_OK(), 'partial builtin TERM is supported');
+  is_deeply($Termbox::global->{caps}, $builtin_terms{xterm},
+    'partial match loads xterm capabilities');
+
+  $ENV{TERM} = 'dumb';
+  is(Termbox::load_builtin_caps(), TB_ERR_UNSUPPORTED_TERM(),
+    'unsupported TERM returns TB_ERR_UNSUPPORTED_TERM');
+
+  delete $ENV{TERM};
+  is(Termbox::load_builtin_caps(), TB_ERR_NO_TERM(),
+    'missing TERM returns TB_ERR_NO_TERM');
+};
 
 done_testing;
