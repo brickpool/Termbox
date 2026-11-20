@@ -49,7 +49,7 @@ WriteMakefile1(
     },
     provides => {
       'Terminal::WCWidth' 
-        => { file => 'lib/Terminal/WCWidth.pm', version => '0.1.5' },
+        => { file => 'lib/Terminal/WCWidth.pm', version => '0.6.3' },
     },
     prereqs => {
       runtime => {
