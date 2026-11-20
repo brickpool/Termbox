@@ -2037,13 +2037,13 @@ B<DEPRECATED>: Please use C<TB_HI_BLACK> instead.
 
 Black constant for 256-color mode. 
 
+=back
+
 =head3 Truecolor attributes
 
 These constants are only available when truecolor support is enabled.
 
 =over 4
-
-B<DEPRECATED>
 
 =item C<TB_TRUECOLOR_BOLD>
 
